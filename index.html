@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#000000">
+    <title>Kcal</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="manifest" href="manifest.json">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+    <div class="app">
+        <div class="safe-top"></div>
+
+        <header class="topbar">
+            <div class="topbar-title">Kcal</div>
+            <div class="topbar-actions">
+                <button class="icon-btn" id="cloudBtn" aria-label="Cloud sync settings">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M17.5 19a4.5 4.5 0 0 0 .42-8.98 6.5 6.5 0 0 0-12.7 1.74A3.99 3.99 0 0 0 6 19.5h11.5"/>
+                    </svg>
+                </button>
+                <button class="icon-btn" id="resetBtn" aria-label="Reset day">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 12a9 9 0 1 0 2.6-6.4"/>
+                        <polyline points="3 4 3 8.5 7.5 8.5"/>
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <div class="content">
+<!-- Hero: totals -->
+            <section class="hero">
+                <div class="hero-top">
+                    <div class="hero-main">
+                        <div class="hero-label">Eaten</div>
+                        <div class="hero-kcal"><span id="totalKcal">0</span><span class="hero-unit">kcal</span></div>
+                    </div>
+                    <div class="hero-balance" id="balanceCard" style="display:none">
+                        <div class="balance-chip" id="balanceChip">
+                            <span id="balanceValue">0</span>
+                        </div>
+                        <div class="balance-sub" id="balanceLabel">of TDEE</div>
+                    </div>
+                </div>
+
+                <div class="macro-bar" id="macroBar" style="display:none">
+                    <div class="mb-seg p" id="proteinSegment"></div>
+                    <div class="mb-seg f" id="fatSegment"></div>
+                    <div class="mb-seg c" id="carbsSegment"></div>
+                </div>
+
+                <div class="hero-macros">
+                    <div class="hm">
+                        <span class="hm-dot p"></span>
+                        <span class="hm-val" id="totalProtein">0</span>
+                        <span class="hm-label">Protein</span>
+                    </div>
+                    <div class="hm">
+                        <span class="hm-dot f"></span>
+                        <span class="hm-val" id="totalFat">0</span>
+                        <span class="hm-label">Fat</span>
+                    </div>
+                    <div class="hm">
+                        <span class="hm-dot c"></span>
+                        <span class="hm-val" id="totalCarbs">0</span>
+                        <span class="hm-label">Carbs</span>
+                    </div>
+                </div>
+
+                <div class="tdee-row">
+                    <label class="tdee-label" for="tdeeInput">TDEE</label>
+                    <input type="number" id="tdeeInput" class="tdee-input" placeholder="—" min="0" step="1" inputmode="numeric" autocomplete="off">
+                    <span class="tdee-unit">kcal</span>
+                </div>
+            </section>
+<!-- Log -->
+            <section class="panel">
+                <div class="panel-head">
+                    <span class="panel-title">Today</span>
+                    <span class="panel-sub" id="loggedCount">empty</span>
+                </div>
+                <div class="log-list" id="loggedList">
+                    <div class="empty" id="emptyState">
+                        <div class="empty-title">Nothing logged yet</div>
+                        <div class="empty-sub">Tap a food in “Foods” below to add it</div>
+                    </div>
+                </div>
+            </section>
+<!-- Foods database (collapsible) -->
+            <section class="panel db-panel">
+                <button class="db-toggle" id="dbToggle" aria-expanded="true" aria-controls="dbBody">
+                    <span class="panel-title">Foods</span>
+                    <span class="db-toggle-right">
+                        <span class="sync-dot off" id="syncDot" title="Cloud sync status"></span>
+                        <span class="panel-sub" id="dbCount">0 saved</span>
+                        <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                    </span>
+                </button>
+                <div class="db-body open" id="dbBody">
+                    <div class="db-inner">
+                        <div class="db-head-actions">
+                            <div class="search" id="searchWrap">
+                                <svg class="search-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                                    <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>
+                                </svg>
+                                <input type="text" id="searchInput" class="search-input" placeholder="Search your foods" autocomplete="off" spellcheck="false">
+                                <button class="clear-btn" id="searchClear" aria-label="Clear">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                                </button>
+                            </div>
+                            <button class="text-btn" id="addCustomBtn">＋ New food</button>
+                        </div>
+
+                        <form class="food-form" id="customFoodForm" style="display:none">
+                            <input type="text" id="customName" class="ff-input ff-name" placeholder="Food name" required autocomplete="off">
+                            <div class="ff-grid">
+                                <div class="ff-cell"><input type="number" id="customKcal" class="ff-input" placeholder="kcal" min="0" step="any" required inputmode="decimal"><span>kcal / 100g</span></div>
+                                <div class="ff-cell"><input type="number" id="customProtein" class="ff-input" placeholder="0" min="0" step="any" inputmode="decimal"><span>protein g</span></div>
+                                <div class="ff-cell"><input type="number" id="customFat" class="ff-input" placeholder="0" min="0" step="any" inputmode="decimal"><span>fat g</span></div>
+                                <div class="ff-cell"><input type="number" id="customCarbs" class="ff-input" placeholder="0" min="0" step="any" inputmode="decimal"><span>carbs g</span></div>
+                            </div>
+                            <div class="ff-actions">
+                                <button type="button" class="btn ghost" id="cancelCustom">Cancel</button>
+                                <button type="submit" class="btn solid">Save food</button>
+                            </div>
+                        </form>
+
+                        <div class="food-list" id="foodList"></div>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <div class="safe-bottom"></div>
+    </div>
+
+<!-- Quantity sheet -->
+<div class="sheet-backdrop" id="quantityModal">
+    <div class="sheet">
+        <div class="sheet-grab"></div>
+        <div class="sheet-head">
+            <div class="sheet-name" id="modalFoodName">Food</div>
+            <div class="sheet-per100" id="modalFoodMacros"></div>
+        </div>
+        <div class="qty-row">
+            <button class="qty-btn" id="qtyMinus" aria-label="Decrease">−</button>
+            <div class="qty-wrap">
+                <input type="number" id="quantityInput" class="qty-input" value="100" min="1" max="5000" step="1" inputmode="decimal">
+                <span class="qty-unit">g</span>
+            </div>
+            <button class="qty-btn" id="qtyPlus" aria-label="Increase">＋</button>
+        </div>
+        <div class="chips" id="quickAmounts"></div>
+        <div class="sheet-preview" id="modalPreview">
+            <div class="pv"><span>kcal</span><b id="previewKcal">0</b></div>
+            <div class="pv"><span>protein</span><b id="previewProtein">0g</b></div>
+            <div class="pv"><span>fat</span><b id="previewFat">0g</b></div>
+            <div class="pv"><span>carbs</span><b id="previewCarbs">0g</b></div>
+        </div>
+        <div class="sheet-actions">
+            <button class="btn ghost" id="modalCancel">Cancel</button>
+            <button class="btn solid" id="modalConfirm">Add</button>
+        </div>
+    </div>
+</div>
+
+<!-- Cloud sync settings sheet -->
+<div class="sheet-backdrop" id="settingsModal">
+    <div class="sheet">
+        <div class="sheet-grab"></div>
+        <div class="sheet-head">
+            <div class="sheet-name">Cloud sync</div>
+            <div class="sheet-per100">Foods database · Supabase</div>
+        </div>
+        <div class="set-field">
+            <label for="supaUrl">Project URL</label>
+            <input type="text" id="supaUrl" placeholder="https://xxxx.supabase.co" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="set-field">
+            <label for="supaKey">Anon public key</label>
+            <input type="text" id="supaKey" placeholder="eyJhbGciOiJIUzI1NiIs…" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="sheet-actions">
+            <button class="btn ghost" id="supaDisconnect">Disconnect</button>
+            <button class="btn solid" id="supaSave">Save &amp; sync</button>
+        </div>
+        <div class="set-note">Create the <b>foods</b> table first — see supabase.sql in the repo. The anon key is public-safe when RLS allows anon access.</div>
+        <button class="btn ghost full" id="settingsCancel">Close</button>
+    </div>
+</div>
+
+<div class="toasts" id="toastContainer"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
