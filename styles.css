@@ -92,18 +92,29 @@ input[type=number] { -moz-appearance: textfield; appearance: textfield; }
 .mb-seg.f { background: var(--cf); }
 .mb-seg.c { background: var(--cc); }
 
-/* hero macros row */
+/* hero macros row — stacked tiles so 3+ digit values never overflow on iPhone */
 .hero-macros { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
 .hm {
-    display: flex; align-items: center; gap: 8px;
+    display: flex; flex-direction: column; gap: 3px;
     background: rgba(255,255,255,.04);
     border-radius: var(--r-sm);
     padding: 10px 12px;
+    min-width: 0;              /* let grid cell shrink */
+    overflow: hidden;
 }
+.hm-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .hm-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .hm-dot.p { background: var(--cp); } .hm-dot.f { background: var(--cf); } .hm-dot.c { background: var(--cc); }
-.hm-val { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
-.hm-label { font-size: 11px; color: var(--t3); margin-left: auto; }
+.hm-val {
+    font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    min-width: 0; line-height: 1.15;
+}
+.hm-label {
+    font-size: 10.5px; color: var(--t3);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    min-width: 0; font-variant-numeric: tabular-nums;
+}
 
 /* TDEE row */
 .tdee-row {

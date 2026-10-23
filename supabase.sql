@@ -25,3 +25,25 @@ drop policy if exists "foods anon delete" on public.foods;
 create policy "foods anon read"   on public.foods for select using (true);
 create policy "foods anon insert" on public.foods for insert with check (true);
 create policy "foods anon delete" on public.foods for delete using (true);
+
+-- ============================================================
+-- Day state: TDEE + today's log, synced across devices.
+-- Single row (id = 'day'). Newest updated_at wins on conflicts.
+-- Re-running this file is safe.
+-- ============================================================
+create table if not exists public.day (
+    id text primary key,
+    tdee numeric,
+    log jsonb not null default '[]'::jsonb,
+    updated_at timestamptz not null default now()
+);
+
+alter table public.day enable row level security;
+
+drop policy if exists "day anon read"   on public.day;
+drop policy if exists "day anon insert" on public.day;
+drop policy if exists "day anon update" on public.day;
+
+create policy "day anon read"   on public.day for select using (true);
+create policy "day anon insert" on public.day for insert with check (true);
+create policy "day anon update" on public.day for update using (true);

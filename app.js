@@ -7,6 +7,7 @@ const STORAGE_KEY = 'kcal-tracker-v2';
 let state = {
     tdee: null,
     dbOpen: true, // collapsible "Foods" panel open by default
+    daySavedAt: 0, // last synced day-state timestamp (ms)
     foods: [],   // user-created: { id, name, kcal, protein, fat, carbs } per 100g
     log: []      // { id, name, grams, kcal, protein, fat, carbs }
 };
@@ -50,12 +51,14 @@ function cacheElements() {
      'modalCancel', 'modalConfirm', 'toastContainer',
      'dbToggle', 'dbBody', 'dbCount',
      'cloudBtn', 'syncDot', 'settingsModal',
-     'supaUrl', 'supaKey', 'supaSave', 'supaDisconnect', 'settingsCancel'
+     'supaUrl', 'supaKey', 'supaSave', 'supaDisconnect', 'settingsCancel',
+     'proteinPct', 'fatPct', 'carbsPct'
     ].forEach(id => el[id] = document.getElementById(id));
 }
 
 function saveState() {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+    scheduleDayPush(); // debounced cloud mirror of TDEE + log (no-op if unchanged/offline)
 }
 
 function loadState() {
@@ -68,6 +71,7 @@ function loadState() {
             state.foods = Array.isArray(p.foods) ? p.foods : [];
             state.log = Array.isArray(p.log) ? p.log : [];
             state.dbOpen = typeof p.dbOpen === 'boolean' ? p.dbOpen : true;
+            state.daySavedAt = typeof p.daySavedAt === 'number' ? p.daySavedAt : 0;
         }
     } catch (e) {}
 }
@@ -227,11 +231,18 @@ function updateTotals() {
     const sum = kp + kf + kc;
     if (sum > 0) {
         el.macroBar.style.display = 'flex';
-        el.proteinSegment.style.width = (kp / sum * 100) + '%';
-        el.fatSegment.style.width = (kf / sum * 100) + '%';
-        el.carbsSegment.style.width = (kc / sum * 100) + '%';
+        const pPct = kp / sum * 100, fPct = kf / sum * 100, cPct = kc / sum * 100;
+        el.proteinSegment.style.width = pPct + '%';
+        el.fatSegment.style.width = fPct + '%';
+        el.carbsSegment.style.width = cPct + '%';
+        el.proteinPct.textContent = Math.round(pPct) + '%';
+        el.fatPct.textContent = Math.round(fPct) + '%';
+        el.carbsPct.textContent = Math.round(cPct) + '%';
     } else {
         el.macroBar.style.display = 'none';
+        el.proteinPct.textContent = '0%';
+        el.fatPct.textContent = '0%';
+        el.carbsPct.textContent = '0%';
     }
 }
 // ---------- Quantity sheet ----------
@@ -452,7 +463,82 @@ function deleteFood(id, name) {
     pushDelete(id);
 }
 
-// ---------- Settings sheet ----------
+// ---------- Day state sync (TDEE + log) ----------
+// Single 'day' row in Supabase. Newest updated_at wins. Local edits push
+// (debounced, only when content actually changed); pulls adopt newer cloud
+// state. Reset clears local AND cloud, so every device clears together.
+let dayPushTimer = null;
+let lastDaySig = null;
+let suppressDayPush = false;
+
+function daySig() {
+    return JSON.stringify([state.tdee, state.log]);
+}
+
+function scheduleDayPush() {
+    const client = getClient();
+    if (!client || suppressDayPush) return;
+    const sig = daySig();
+    if (sig === lastDaySig) return; // nothing changed since last push
+    clearTimeout(dayPushTimer);
+    dayPushTimer = setTimeout(async () => {
+        const client2 = getClient();
+        if (!client2) return;
+        try {
+            const ts = new Date().toISOString();
+            const { error } = await client2.from('day').upsert({
+                id: 'day', tdee: state.tdee, log: state.log, updated_at: ts
+            });
+            if (error) throw error;
+            lastDaySig = sig;
+            state.daySavedAt = Date.parse(ts);
+            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+        } catch (e) {
+            console.warn('day push failed:', e);
+        }
+    }, 800);
+}
+
+async function pullDay() {
+    const client = getClient();
+    if (!client) return;
+    try {
+        const { data, error } = await client.from('day').select('*').eq('id', 'day').maybeSingle();
+        if (error) throw error;
+
+        if (!data) {
+            // First ever sync: seed the cloud with whatever is on this device
+            lastDaySig = null;
+            scheduleDayPush();
+            return;
+        }
+
+        const cloudTs = Date.parse(data.updated_at) || 0;
+        const localTs = state.daySavedAt || 0;
+
+        if (cloudTs > localTs) {
+            // Cloud is newer → adopt it (skip the echo push)
+            suppressDayPush = true;
+            state.tdee = data.tdee == null ? null : +data.tdee;
+            state.log = Array.isArray(data.log) ? data.log : [];
+            state.daySavedAt = cloudTs;
+            lastDaySig = daySig();
+            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+            suppressDayPush = false;
+            if (el.tdeeInput) el.tdeeInput.value = state.tdee || '';
+            renderLog();
+            updateTotals();
+            if (state.log.length) toast('Day loaded from cloud');
+        } else if (localTs > cloudTs) {
+            // Local is newer → push it up
+            lastDaySig = null;
+            scheduleDayPush();
+        }
+    } catch (e) {
+        console.warn('pullDay failed:', e);
+    }
+}
+
 function openSettings() {
     const cfg = loadCfg();
     el.supaUrl.value = cfg?.url || '';
@@ -486,14 +572,16 @@ function disconnectCloud() {
 
 function resetDay() {
     if (state.log.length === 0 && !state.tdee) { toast('Nothing to reset'); return; }
-    if (!confirm('Clear today\'s log and TDEE?\nYour food database is kept.')) return;
+    if (!confirm('Clear today\'s log and TDEE?\nYour food database is kept.\nThis clears on ALL synced devices.')) return;
     state.log = [];
     state.tdee = null;
+    lastDaySig = null;          // force the empty-day push to the cloud
+    state.daySavedAt = Date.now();
     saveState();
     el.tdeeInput.value = '';
     renderLog();
     updateTotals();
-    toast('Day reset');
+    toast('Day reset — cleared on all devices');
 }
 
 // ---------- Events ----------
@@ -581,7 +669,8 @@ function init() {
     wireEvents();
     // Instant localStorage render is done above — now refresh from cloud in
     // the background (no spinner, no blocking; list is already visible).
-    syncPull();
+    syncPull();  // foods database
+    pullDay();   // TDEE + today's log
 }
 
 document.addEventListener('DOMContentLoaded', init);
