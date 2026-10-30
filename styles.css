@@ -116,11 +116,14 @@ input[type=number] { -moz-appearance: textfield; appearance: textfield; }
     min-width: 0; font-variant-numeric: tabular-nums;
 }
 
-/* TDEE row */
-.tdee-row {
-    display: flex; align-items: center; gap: 10px;
+/* TDEE rows (BMR + Activity) */
+.tdee-block {
+    display: flex; flex-direction: column; gap: 12px;
     border-top: 1px solid var(--line);
     padding-top: 14px;
+}
+.tdee-row {
+    display: flex; align-items: center; gap: 10px;
 }
 .tdee-label { font-size: 13px; font-weight: 700; color: var(--t2); letter-spacing: .5px; }
 .tdee-input {

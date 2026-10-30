@@ -33,10 +33,13 @@ create policy "foods anon delete" on public.foods for delete using (true);
 -- ============================================================
 create table if not exists public.day (
     id text primary key,
-    tdee numeric,
+    bmr numeric,
+    activity numeric default 0,
     log jsonb not null default '[]'::jsonb,
     updated_at timestamptz not null default now()
 );
+alter table public.day add column if not exists bmr numeric;
+alter table public.day add column if not exists activity numeric default 0;
 
 alter table public.day enable row level security;
 

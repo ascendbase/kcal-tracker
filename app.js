@@ -5,7 +5,8 @@
 
 const STORAGE_KEY = 'kcal-tracker-v2';
 let state = {
-    tdee: null,
+    bmr: null,   // BMR — permanent, survives the reset button
+    activity: 0, // Activity — resets to 0 on day reset
     dbOpen: true, // collapsible "Foods" panel open by default
     daySavedAt: 0, // last synced day-state timestamp (ms)
     foods: [],   // user-created: { id, name, kcal, protein, fat, carbs } per 100g
@@ -39,7 +40,7 @@ function sanitizeDecimalInput(input) {
 
 const el = {};
 function cacheElements() {
-    ['tdeeInput', 'searchInput', 'searchClear', 'foodList', 'customFoodForm',
+    ['bmrInput', 'activityInput', 'searchInput', 'searchClear', 'foodList', 'customFoodForm',
      'customName', 'customKcal', 'customProtein', 'customFat', 'customCarbs',
      'cancelCustom', 'addCustomBtn', 'loggedList', 'loggedCount', 'emptyState',
      'totalKcal', 'totalProtein', 'totalFat', 'totalCarbs',
@@ -67,7 +68,8 @@ function loadState() {
         if (!raw) return;
         const p = JSON.parse(raw);
         if (p && typeof p === 'object') {
-            state.tdee = typeof p.tdee === 'number' ? p.tdee : null;
+            state.bmr = typeof p.bmr === 'number' ? p.bmr : null;
+            state.activity = typeof p.activity === 'number' ? p.activity : 0;
             state.foods = Array.isArray(p.foods) ? p.foods : [];
             state.log = Array.isArray(p.log) ? p.log : [];
             state.dbOpen = typeof p.dbOpen === 'boolean' ? p.dbOpen : true;
@@ -207,17 +209,18 @@ function updateTotals() {
     el.totalFat.textContent = fmt(t.fat);
     el.totalCarbs.textContent = fmt(t.carbs);
 
-    if (state.tdee && state.tdee > 0) {
-        const bal = t.kcal - state.tdee;
+    const tdee = getTdee();
+    if (tdee && tdee > 0) {
+        const bal = t.kcal - tdee;
         el.balanceCard.style.display = '';
         if (bal < 0) {
             el.balanceChip.className = 'balance-chip deficit';
             el.balanceValue.textContent = `−${fmt(-bal, 0)}`;
-            el.balanceLabel.textContent = `deficit · target ${fmt(state.tdee, 0)}`;
+            el.balanceLabel.textContent = `deficit · target ${fmt(tdee, 0)}`;
         } else if (bal > 0) {
             el.balanceChip.className = 'balance-chip surplus';
             el.balanceValue.textContent = `+${fmt(bal, 0)}`;
-            el.balanceLabel.textContent = `surplus · target ${fmt(state.tdee, 0)}`;
+            el.balanceLabel.textContent = `surplus · target ${fmt(tdee, 0)}`;
         } else {
             el.balanceChip.className = 'balance-chip even';
             el.balanceValue.textContent = '0';
@@ -471,8 +474,15 @@ let dayPushTimer = null;
 let lastDaySig = null;
 let suppressDayPush = false;
 
+function getTdee() {
+    const b = state.bmr || 0;
+    const a = state.activity || 0;
+    if (b <= 0 && a <= 0) return null;
+    return b + a;
+}
+
 function daySig() {
-    return JSON.stringify([state.tdee, state.log]);
+    return JSON.stringify([state.bmr, state.activity, state.log]);
 }
 
 function scheduleDayPush() {
@@ -487,7 +497,7 @@ function scheduleDayPush() {
         try {
             const ts = new Date().toISOString();
             const { error } = await client2.from('day').upsert({
-                id: 'day', tdee: state.tdee, log: state.log, updated_at: ts
+                id: 'day', bmr: state.bmr, activity: state.activity, log: state.log, updated_at: ts
             });
             if (error) throw error;
             lastDaySig = sig;
@@ -519,13 +529,15 @@ async function pullDay() {
         if (cloudTs > localTs) {
             // Cloud is newer → adopt it (skip the echo push)
             suppressDayPush = true;
-            state.tdee = data.tdee == null ? null : +data.tdee;
+            state.bmr = data.bmr == null ? null : +data.bmr;
+            state.activity = data.activity == null ? 0 : +data.activity;
             state.log = Array.isArray(data.log) ? data.log : [];
             state.daySavedAt = cloudTs;
             lastDaySig = daySig();
             try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
             suppressDayPush = false;
-            if (el.tdeeInput) el.tdeeInput.value = state.tdee || '';
+            if (el.bmrInput) el.bmrInput.value = state.bmr || '';
+            if (el.activityInput) el.activityInput.value = state.activity || '';
             renderLog();
             updateTotals();
             if (state.log.length) toast('Day loaded from cloud');
@@ -571,14 +583,14 @@ function disconnectCloud() {
 }
 
 function resetDay() {
-    if (state.log.length === 0 && !state.tdee) { toast('Nothing to reset'); return; }
-    if (!confirm('Clear today\'s log and TDEE?\nYour food database is kept.\nThis clears on ALL synced devices.')) return;
+    if (state.log.length === 0 && !state.activity) { toast('Nothing to reset'); return; }
+    if (!confirm('Clear today\'s log and Activity?\nYour food database and BMR are kept.\nThis clears on ALL synced devices.')) return;
     state.log = [];
-    state.tdee = null;
+    state.activity = 0; // BMR stays untouched
     lastDaySig = null;          // force the empty-day push to the cloud
     state.daySavedAt = Date.now();
     saveState();
-    el.tdeeInput.value = '';
+    el.activityInput.value = '';
     renderLog();
     updateTotals();
     toast('Day reset — cleared on all devices');
@@ -586,9 +598,16 @@ function resetDay() {
 
 // ---------- Events ----------
 function wireEvents() {
-    el.tdeeInput.addEventListener('input', () => {
-        const v = parseFloat(el.tdeeInput.value);
-        state.tdee = (!isNaN(v) && v > 0) ? v : null;
+    el.bmrInput.addEventListener('input', () => {
+        const v = parseFloat(el.bmrInput.value);
+        state.bmr = (!isNaN(v) && v > 0) ? v : null;
+        saveState();
+        updateTotals();
+    });
+
+    el.activityInput.addEventListener('input', () => {
+        const v = parseFloat(el.activityInput.value);
+        state.activity = (!isNaN(v) && v > 0) ? v : 0;
         saveState();
         updateTotals();
     });
@@ -621,7 +640,7 @@ function wireEvents() {
 
     // Decimal inputs: allow "0.3" style entry regardless of keyboard locale
     [el.customKcal, el.customProtein, el.customFat, el.customCarbs,
-     el.tdeeInput, el.quantityInput
+     el.bmrInput, el.activityInput, el.quantityInput
     ].forEach(sanitizeDecimalInput);
 
     // Cloud sync settings
@@ -659,7 +678,8 @@ function wireEvents() {
 function init() {
     cacheElements();
     loadState();
-    if (state.tdee) el.tdeeInput.value = state.tdee;
+    if (state.bmr) el.bmrInput.value = state.bmr;
+    if (state.activity) el.activityInput.value = state.activity;
     // Apply saved collapsed/expanded state of the Foods panel
     el.dbBody.classList.toggle('open', state.dbOpen !== false);
     el.dbToggle.setAttribute('aria-expanded', String(state.dbOpen !== false));
