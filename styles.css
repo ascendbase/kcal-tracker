@@ -144,6 +144,8 @@ input[type=number] { -moz-appearance: textfield; appearance: textfield; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .panel-title { font-size: 18px; font-weight: 700; letter-spacing: -.3px; }
 .panel-sub { font-size: 13px; color: var(--t3); }
+.panel-head-right { display: flex; align-items: center; gap: 10px; }
+.text-btn.small { font-size: 13px; padding: 6px 12px; }
 
 .text-btn {
     font-size: 15px; font-weight: 700; color: var(--t1);
@@ -320,6 +322,10 @@ input[type=number] { -moz-appearance: textfield; appearance: textfield; }
 .lr-info { flex: 1; min-width: 0; }
 .lr-name { font-size: 15.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lr-meta { font-size: 12.5px; color: var(--t2); margin-top: 2px; }
+.log-row.editable { cursor: pointer; }
+.log-row.editable:active { background: rgba(255,255,255,.03); }
+.log-row.comment .lr-name { color: var(--t2); font-style: italic; }
+.log-row.comment .lr-kcal { display: none; }
 .lr-kcal { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; flex-shrink: 0; }
 .lr-del {
     width: 30px; height: 30px; border-radius: 50%;

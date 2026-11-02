@@ -80,13 +80,21 @@
                         <input type="number" id="activityInput" class="tdee-input" placeholder="0" min="0" step="1" inputmode="numeric" autocomplete="off">
                         <span class="tdee-unit">kcal</span>
                     </div>
+                    <div class="tdee-row">
+                        <label class="tdee-label" for="deficitInput">Deficit</label>
+                        <input type="number" id="deficitInput" class="tdee-input" placeholder="0" min="0" step="1" inputmode="numeric" autocomplete="off">
+                        <span class="tdee-unit">kcal</span>
+                    </div>
                 </div>
             </section>
 <!-- Log -->
             <section class="panel">
                 <div class="panel-head">
                     <span class="panel-title">Today</span>
-                    <span class="panel-sub" id="loggedCount">empty</span>
+                    <span class="panel-head-right">
+                        <button class="text-btn small" id="addCommentBtn">＋ Comment</button>
+                        <span class="panel-sub" id="loggedCount">empty</span>
+                    </span>
                 </div>
                 <div class="log-list" id="loggedList">
                     <div class="empty" id="emptyState">

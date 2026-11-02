@@ -7,6 +7,7 @@ const STORAGE_KEY = 'kcal-tracker-v2';
 let state = {
     bmr: null,   // BMR — permanent, survives the reset button
     activity: 0, // Activity — resets to 0 on day reset
+    deficit: 0,  // Daily deficit goal — permanent, survives the reset button
     dbOpen: true, // collapsible "Foods" panel open by default
     daySavedAt: 0, // last synced day-state timestamp (ms)
     foods: [],   // user-created: { id, name, kcal, protein, fat, carbs } per 100g
@@ -40,7 +41,7 @@ function sanitizeDecimalInput(input) {
 
 const el = {};
 function cacheElements() {
-    ['bmrInput', 'activityInput', 'searchInput', 'searchClear', 'foodList', 'customFoodForm',
+    ['bmrInput', 'activityInput', 'deficitInput', 'addCommentBtn', 'searchInput', 'searchClear', 'foodList', 'customFoodForm',
      'customName', 'customKcal', 'customProtein', 'customFat', 'customCarbs',
      'cancelCustom', 'addCustomBtn', 'loggedList', 'loggedCount', 'emptyState',
      'totalKcal', 'totalProtein', 'totalFat', 'totalCarbs',
@@ -70,6 +71,7 @@ function loadState() {
         if (p && typeof p === 'object') {
             state.bmr = typeof p.bmr === 'number' ? p.bmr : null;
             state.activity = typeof p.activity === 'number' ? p.activity : 0;
+            state.deficit = typeof p.deficit === 'number' ? p.deficit : 0;
             state.foods = Array.isArray(p.foods) ? p.foods : [];
             state.log = Array.isArray(p.log) ? p.log : [];
             state.dbOpen = typeof p.dbOpen === 'boolean' ? p.dbOpen : true;
@@ -170,7 +172,7 @@ function renderLog() {
 
     [...state.log].reverse().forEach(entry => {
         const row = document.createElement('div');
-        row.className = 'log-row';
+        row.className = entry.comment ? 'log-row comment' : 'log-row editable';
         row.dataset.id = entry.id;
         row.innerHTML = `
             <div class="lr-info">
@@ -182,12 +184,55 @@ function renderLog() {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
             </button>
         `;
-        row.querySelector('.lr-name').textContent = entry.name;
-        row.querySelector('.lr-meta').textContent = `${fmt(entry.grams, 0)} g · P ${fmt(entry.protein)} · F ${fmt(entry.fat)} · C ${fmt(entry.carbs)}`;
-        row.querySelector('.lr-kcal').textContent = `${fmt(entry.kcal, 0)} kcal`;
+        if (entry.comment) {
+            row.querySelector('.lr-name').textContent = entry.name;
+            row.querySelector('.lr-meta').textContent = 'comment';
+            row.addEventListener('click', e => {
+                if (e.target.closest('.lr-del')) return;
+                editComment(entry.id);
+            });
+        } else {
+            row.querySelector('.lr-name').textContent = entry.name;
+            row.querySelector('.lr-meta').textContent = `${fmt(entry.grams, 0)} g · P ${fmt(entry.protein)} · F ${fmt(entry.fat)} · C ${fmt(entry.carbs)}`;
+            row.querySelector('.lr-kcal').textContent = `${fmt(entry.kcal, 0)} kcal`;
+            row.addEventListener('click', e => {
+                if (e.target.closest('.lr-del')) return;
+                openEditSheet(entry.id);
+            });
+        }
         row.querySelector('.lr-del').addEventListener('click', () => removeLog(entry.id));
         list.appendChild(row);
     });
+}
+
+// ---------- Comment (0 kcal note) ----------
+function addComment() {
+    const text = prompt('Comment:');
+    if (text == null) return; // cancelled
+    const name = text.trim();
+    if (!name) return;
+    state.log.push({
+        id: uid(),
+        comment: true,
+        name,
+        grams: 0, kcal: 0, protein: 0, fat: 0, carbs: 0
+    });
+    saveState();
+    renderLog();
+    updateTotals();
+    toast('Comment added');
+}
+
+function editComment(id) {
+    const entry = state.log.find(i => i.id === id);
+    if (!entry) return;
+    const text = prompt('Edit comment:', entry.name);
+    if (text == null) return; // cancelled
+    const name = text.trim();
+    if (!name) return;
+    entry.name = name;
+    saveState();
+    renderLog();
 }
 
 function removeLog(id) {
@@ -209,18 +254,18 @@ function updateTotals() {
     el.totalFat.textContent = fmt(t.fat);
     el.totalCarbs.textContent = fmt(t.carbs);
 
-    const tdee = getTdee();
-    if (tdee && tdee > 0) {
-        const bal = t.kcal - tdee;
+    const goal = getGoal();
+    if (goal && goal > 0) {
+        const left = goal - t.kcal;
         el.balanceCard.style.display = '';
-        if (bal < 0) {
+        if (left > 0) {
             el.balanceChip.className = 'balance-chip deficit';
-            el.balanceValue.textContent = `−${fmt(-bal, 0)}`;
-            el.balanceLabel.textContent = `deficit · target ${fmt(tdee, 0)}`;
-        } else if (bal > 0) {
+            el.balanceValue.textContent = fmt(left, 0);
+            el.balanceLabel.textContent = `kcal left · target ${fmt(goal, 0)}`;
+        } else if (left < 0) {
             el.balanceChip.className = 'balance-chip surplus';
-            el.balanceValue.textContent = `+${fmt(bal, 0)}`;
-            el.balanceLabel.textContent = `surplus · target ${fmt(tdee, 0)}`;
+            el.balanceValue.textContent = `+${fmt(-left, 0)}`;
+            el.balanceLabel.textContent = `over target ${fmt(goal, 0)}`;
         } else {
             el.balanceChip.className = 'balance-chip even';
             el.balanceValue.textContent = '0';
@@ -250,9 +295,11 @@ function updateTotals() {
 }
 // ---------- Quantity sheet ----------
 let sheetFood = null;
+let sheetEditId = null; // when set, the sheet edits an existing log entry
 
 function openSheet(food) {
     sheetFood = food;
+    sheetEditId = null;
     el.modalFoodName.textContent = food.name;
     el.modalFoodMacros.textContent = `Per 100 g — ${food.kcal} kcal · P ${fmt(food.protein)} · F ${fmt(food.fat)} · C ${fmt(food.carbs)}`;
     el.quantityInput.value = 100;
@@ -272,9 +319,45 @@ function openSheet(food) {
     setTimeout(() => el.quantityInput.select(), 380);
 }
 
+// Tap an already-logged food to change its grams. Per-100 g values are
+// derived from the entry itself (macros scale linearly with grams).
+function openEditSheet(id) {
+    const entry = state.log.find(i => i.id === id);
+    if (!entry || entry.comment) return;
+    const g = entry.grams || 0;
+    if (g <= 0) return;
+    const f = 100 / g;
+    sheetFood = {
+        name: entry.name,
+        kcal: (entry.kcal || 0) * f,
+        protein: (entry.protein || 0) * f,
+        fat: (entry.fat || 0) * f,
+        carbs: (entry.carbs || 0) * f
+    };
+    sheetEditId = id;
+    el.modalFoodName.textContent = entry.name;
+    el.modalFoodMacros.textContent = `Per 100 g — ${fmt(sheetFood.kcal, 0)} kcal · P ${fmt(sheetFood.protein)} · F ${fmt(sheetFood.fat)} · C ${fmt(sheetFood.carbs)}`;
+    el.quantityInput.value = g;
+
+    el.quickAmounts.innerHTML = '';
+    [30, 50, 100, 150, 200, 250].forEach(a => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'chip';
+        b.textContent = a + ' g';
+        b.addEventListener('click', () => { el.quantityInput.value = a; updatePreview(); });
+        el.quickAmounts.appendChild(b);
+    });
+
+    updatePreview();
+    el.quantityModal.classList.add('open');
+    setTimeout(() => el.quantityInput.select(), 380);
+}
+
 function closeSheet() {
     el.quantityModal.classList.remove('open');
     sheetFood = null;
+    sheetEditId = null;
 }
 
 function updatePreview() {
@@ -292,20 +375,37 @@ function confirmSheet() {
     const g = parseFloat(el.quantityInput.value);
     if (!g || g <= 0) { toast('Enter a valid amount'); return; }
     const f = g / 100;
-    state.log.push({
-        id: uid(),
-        name: sheetFood.name,
-        grams: g,
-        kcal: sheetFood.kcal * f,
-        protein: sheetFood.protein * f,
-        fat: sheetFood.fat * f,
-        carbs: sheetFood.carbs * f
-    });
-    saveState();
-    renderLog();
-    updateTotals();
+
+    if (sheetEditId != null) {
+        // Edit mode: update the existing entry in place
+        const entry = state.log.find(i => i.id === sheetEditId);
+        if (entry) {
+            entry.grams = g;
+            entry.kcal = sheetFood.kcal * f;
+            entry.protein = sheetFood.protein * f;
+            entry.fat = sheetFood.fat * f;
+            entry.carbs = sheetFood.carbs * f;
+            saveState();
+            renderLog();
+            updateTotals();
+            toast(`Updated · ${fmt(g, 0)} g · ${entry.name}`);
+        }
+    } else {
+        state.log.push({
+            id: uid(),
+            name: sheetFood.name,
+            grams: g,
+            kcal: sheetFood.kcal * f,
+            protein: sheetFood.protein * f,
+            fat: sheetFood.fat * f,
+            carbs: sheetFood.carbs * f
+        });
+        saveState();
+        renderLog();
+        updateTotals();
+        toast(`Added ${fmt(g, 0)} g · ${sheetFood.name}`);
+    }
     closeSheet();
-    toast(`Added ${fmt(g, 0)} g · ${sheetFood.name}`);
 }
 
 // ---------- Custom food form ----------
@@ -481,8 +581,14 @@ function getTdee() {
     return b + a;
 }
 
+function getGoal() {
+    const tdee = getTdee();
+    if (tdee == null) return null;
+    return tdee - (state.deficit || 0);
+}
+
 function daySig() {
-    return JSON.stringify([state.bmr, state.activity, state.log]);
+    return JSON.stringify([state.bmr, state.activity, state.deficit, state.log]);
 }
 
 function scheduleDayPush() {
@@ -497,7 +603,7 @@ function scheduleDayPush() {
         try {
             const ts = new Date().toISOString();
             const { error } = await client2.from('day').upsert({
-                id: 'day', bmr: state.bmr, activity: state.activity, log: state.log, updated_at: ts
+                id: 'day', bmr: state.bmr, activity: state.activity, deficit: state.deficit, log: state.log, updated_at: ts
             });
             if (error) throw error;
             lastDaySig = sig;
@@ -531,6 +637,7 @@ async function pullDay() {
             suppressDayPush = true;
             state.bmr = data.bmr == null ? null : +data.bmr;
             state.activity = data.activity == null ? 0 : +data.activity;
+            state.deficit = data.deficit == null ? 0 : +data.deficit;
             state.log = Array.isArray(data.log) ? data.log : [];
             state.daySavedAt = cloudTs;
             lastDaySig = daySig();
@@ -538,6 +645,7 @@ async function pullDay() {
             suppressDayPush = false;
             if (el.bmrInput) el.bmrInput.value = state.bmr || '';
             if (el.activityInput) el.activityInput.value = state.activity || '';
+            if (el.deficitInput) el.deficitInput.value = state.deficit || '';
             renderLog();
             updateTotals();
             if (state.log.length) toast('Day loaded from cloud');
@@ -612,6 +720,15 @@ function wireEvents() {
         updateTotals();
     });
 
+    el.deficitInput.addEventListener('input', () => {
+        const v = parseFloat(el.deficitInput.value);
+        state.deficit = (!isNaN(v) && v > 0) ? v : 0;
+        saveState();
+        updateTotals();
+    });
+
+    el.addCommentBtn.addEventListener('click', addComment);
+
     el.searchInput.addEventListener('input', () => {
         el.searchClear.classList.toggle('show', el.searchInput.value.length > 0);
         renderFoods();
@@ -640,7 +757,7 @@ function wireEvents() {
 
     // Decimal inputs: allow "0.3" style entry regardless of keyboard locale
     [el.customKcal, el.customProtein, el.customFat, el.customCarbs,
-     el.bmrInput, el.activityInput, el.quantityInput
+     el.bmrInput, el.activityInput, el.deficitInput, el.quantityInput
     ].forEach(sanitizeDecimalInput);
 
     // Cloud sync settings
@@ -680,6 +797,7 @@ function init() {
     loadState();
     if (state.bmr) el.bmrInput.value = state.bmr;
     if (state.activity) el.activityInput.value = state.activity;
+    if (state.deficit) el.deficitInput.value = state.deficit;
     // Apply saved collapsed/expanded state of the Foods panel
     el.dbBody.classList.toggle('open', state.dbOpen !== false);
     el.dbToggle.setAttribute('aria-expanded', String(state.dbOpen !== false));
