@@ -597,22 +597,34 @@ function scheduleDayPush() {
     const sig = daySig();
     if (sig === lastDaySig) return; // nothing changed since last push
     clearTimeout(dayPushTimer);
-    dayPushTimer = setTimeout(async () => {
-        const client2 = getClient();
-        if (!client2) return;
-        try {
-            const ts = new Date().toISOString();
-            const { error } = await client2.from('day').upsert({
-                id: 'day', bmr: state.bmr, activity: state.activity, deficit: state.deficit, log: state.log, updated_at: ts
-            });
-            if (error) throw error;
-            lastDaySig = sig;
-            state.daySavedAt = Date.parse(ts);
-            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
-        } catch (e) {
-            console.warn('day push failed:', e);
-        }
-    }, 800);
+    dayPushTimer = setTimeout(() => pushDay(sig), 800);
+}
+
+async function pushDay(sig) {
+    const client = getClient();
+    if (!client) return;
+    try {
+        const ts = new Date().toISOString();
+        const { error } = await client.from('day').upsert({
+            id: 'day', bmr: state.bmr, activity: state.activity, deficit: state.deficit, log: state.log, updated_at: ts
+        });
+        if (error) throw error;
+        lastDaySig = sig;
+        state.daySavedAt = Date.parse(ts);
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+    } catch (e) {
+        console.warn('day push failed:', e);
+        daySyncFailed('Day sync failed — re-run supabase.sql (day table)');
+    }
+}
+
+// Show the failure once per session instead of spamming toasts
+let daySyncFailedShown = false;
+function daySyncFailed(msg) {
+    if (daySyncFailedShown) return;
+    daySyncFailedShown = true;
+    toast(msg);
+    setSyncStatus('err', msg);
 }
 
 async function pullDay() {
@@ -656,7 +668,28 @@ async function pullDay() {
         }
     } catch (e) {
         console.warn('pullDay failed:', e);
+        daySyncFailed('Day sync failed — re-run supabase.sql (day table)');
     }
+}
+
+// Re-sync when the user returns to the app (another device may have changed
+// things while this page was in the background). Throttled to once per 30s.
+let lastDayPull = 0;
+function refreshDayOnFocus() {
+    const now = Date.now();
+    if (now - lastDayPull < 30000) return;
+    lastDayPull = now;
+    pullDay();
+}
+
+// Flush any pending debounced push immediately (app going to background /
+// being closed right after an edit would otherwise lose the change).
+function flushDayPush() {
+    if (!dayPushTimer) return;
+    clearTimeout(dayPushTimer);
+    dayPushTimer = null;
+    const sig = daySig();
+    if (sig !== lastDaySig) pushDay(sig);
 }
 
 function openSettings() {
@@ -680,6 +713,7 @@ async function saveSettings() {
     closeSettings();
     toast('Cloud connected');
     syncPull();
+    pullDay(); // also adopt/push today's log + inputs
 }
 
 function disconnectCloud() {
@@ -785,6 +819,15 @@ function wireEvents() {
     });
 
     el.resetBtn.addEventListener('click', resetDay);
+
+    // Cross-device sync: adopt cloud changes when the app regains focus,
+    // and never lose a pending push when it loses focus / is closed.
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) flushDayPush();
+        else refreshDayOnFocus();
+    });
+    window.addEventListener('pagehide', flushDayPush);
+    window.addEventListener('beforeunload', flushDayPush);
 
     document.addEventListener('keydown', e => {
         if (e.key === 'Escape' && el.quantityModal.classList.contains('open')) closeSheet();
