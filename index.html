@@ -208,6 +208,31 @@
     </div>
 </div>
 
+<!-- Comment sheet (0+ kcal note) -->
+<div class="sheet-backdrop" id="commentModal">
+    <div class="sheet">
+        <div class="sheet-grab"></div>
+        <div class="sheet-head">
+            <div class="sheet-name" id="commentTitle">Add comment</div>
+            <div class="sheet-per100">Optional kcal / macros — blank counts as 0</div>
+        </div>
+        <div class="set-field">
+            <label for="commentName">Comment</label>
+            <input type="text" id="commentName" placeholder="e.g. cheat meal, fasting day…" autocomplete="off">
+        </div>
+        <div class="ff-grid">
+            <div class="ff-cell"><input type="number" id="commentKcal" class="ff-input" placeholder="0" min="0" step="any" inputmode="decimal"><span>kcal</span></div>
+            <div class="ff-cell"><input type="number" id="commentProtein" class="ff-input" placeholder="0" min="0" step="any" inputmode="decimal"><span>protein g</span></div>
+            <div class="ff-cell"><input type="number" id="commentFat" class="ff-input" placeholder="0" min="0" step="any" inputmode="decimal"><span>fat g</span></div>
+            <div class="ff-cell"><input type="number" id="commentCarbs" class="ff-input" placeholder="0" min="0" step="any" inputmode="decimal"><span>carbs g</span></div>
+        </div>
+        <div class="sheet-actions">
+            <button class="btn ghost" id="commentCancel">Cancel</button>
+            <button class="btn solid" id="commentSave">Save</button>
+        </div>
+    </div>
+</div>
+
 <div class="toasts" id="toastContainer"></div>
 
 <script src="app.js"></script>

@@ -51,6 +51,8 @@ function cacheElements() {
      'quantityInput', 'qtyMinus', 'qtyPlus', 'quickAmounts',
      'previewKcal', 'previewProtein', 'previewFat', 'previewCarbs',
      'modalCancel', 'modalConfirm', 'toastContainer',
+     'commentModal', 'commentTitle', 'commentName', 'commentKcal', 'commentProtein',
+     'commentFat', 'commentCarbs', 'commentCancel', 'commentSave',
      'dbToggle', 'dbBody', 'dbCount',
      'cloudBtn', 'syncDot', 'settingsModal',
      'supaUrl', 'supaKey', 'supaSave', 'supaDisconnect', 'settingsCancel',
@@ -186,10 +188,14 @@ function renderLog() {
         `;
         if (entry.comment) {
             row.querySelector('.lr-name').textContent = entry.name;
-            row.querySelector('.lr-meta').textContent = 'comment';
+            const hasMacros = (entry.kcal || 0) > 0 || (entry.protein || 0) > 0 || (entry.fat || 0) > 0 || (entry.carbs || 0) > 0;
+            row.querySelector('.lr-meta').textContent = hasMacros
+                ? `P ${fmt(entry.protein)} · F ${fmt(entry.fat)} · C ${fmt(entry.carbs)}`
+                : 'comment';
+            row.querySelector('.lr-kcal').textContent = (entry.kcal || 0) > 0 ? `${fmt(entry.kcal, 0)} kcal` : '';
             row.addEventListener('click', e => {
                 if (e.target.closest('.lr-del')) return;
-                editComment(entry.id);
+                openCommentModal(entry.id);
             });
         } else {
             row.querySelector('.lr-name').textContent = entry.name;
@@ -205,34 +211,58 @@ function renderLog() {
     });
 }
 
-// ---------- Comment (0 kcal note) ----------
-function addComment() {
-    const text = prompt('Comment:');
-    if (text == null) return; // cancelled
-    const name = text.trim();
-    if (!name) return;
-    state.log.push({
-        id: uid(),
-        comment: true,
-        name,
-        grams: 0, kcal: 0, protein: 0, fat: 0, carbs: 0
-    });
-    saveState();
-    renderLog();
-    updateTotals();
-    toast('Comment added');
+// ---------- Comment (note with optional kcal / macros) ----------
+let commentEditId = null;
+
+function openCommentModal(id) {
+    commentEditId = id || null;
+    const entry = id != null ? state.log.find(i => i.id === id) : null;
+    el.commentTitle.textContent = entry ? 'Edit comment' : 'Add comment';
+    el.commentName.value = entry ? entry.name : '';
+    el.commentKcal.value = entry && entry.kcal > 0 ? entry.kcal : '';
+    el.commentProtein.value = entry && entry.protein > 0 ? entry.protein : '';
+    el.commentFat.value = entry && entry.fat > 0 ? entry.fat : '';
+    el.commentCarbs.value = entry && entry.carbs > 0 ? entry.carbs : '';
+    el.commentModal.classList.add('open');
+    setTimeout(() => el.commentName.focus(), 380);
 }
 
-function editComment(id) {
-    const entry = state.log.find(i => i.id === id);
-    if (!entry) return;
-    const text = prompt('Edit comment:', entry.name);
-    if (text == null) return; // cancelled
-    const name = text.trim();
-    if (!name) return;
-    entry.name = name;
-    saveState();
-    renderLog();
+function closeCommentModal() {
+    el.commentModal.classList.remove('open');
+    commentEditId = null;
+}
+
+function saveComment() {
+    const name = el.commentName.value.trim();
+    if (!name) { toast('Enter a comment'); return; }
+    const num = input => {
+        const v = parseFloat(input.value);
+        return (!isNaN(v) && v > 0) ? v : 0;
+    };
+    const data = {
+        name,
+        kcal: num(el.commentKcal),
+        protein: num(el.commentProtein),
+        fat: num(el.commentFat),
+        carbs: num(el.commentCarbs)
+    };
+    if (commentEditId != null) {
+        const entry = state.log.find(i => i.id === commentEditId);
+        if (entry) {
+            Object.assign(entry, data);
+            saveState();
+            renderLog();
+            updateTotals();
+            toast('Comment updated');
+        }
+    } else {
+        state.log.push({ id: uid(), comment: true, grams: 0, ...data });
+        saveState();
+        renderLog();
+        updateTotals();
+        toast('Comment added');
+    }
+    closeCommentModal();
 }
 
 function removeLog(id) {
@@ -761,7 +791,13 @@ function wireEvents() {
         updateTotals();
     });
 
-    el.addCommentBtn.addEventListener('click', addComment);
+    el.addCommentBtn.addEventListener('click', () => openCommentModal());
+
+    // Comment sheet
+    el.commentCancel.addEventListener('click', closeCommentModal);
+    el.commentSave.addEventListener('click', saveComment);
+    el.commentModal.addEventListener('click', e => { if (e.target === el.commentModal) closeCommentModal(); });
+    el.commentName.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); saveComment(); } });
 
     el.searchInput.addEventListener('input', () => {
         el.searchClear.classList.toggle('show', el.searchInput.value.length > 0);
@@ -791,7 +827,8 @@ function wireEvents() {
 
     // Decimal inputs: allow "0.3" style entry regardless of keyboard locale
     [el.customKcal, el.customProtein, el.customFat, el.customCarbs,
-     el.bmrInput, el.activityInput, el.deficitInput, el.quantityInput
+     el.bmrInput, el.activityInput, el.deficitInput, el.quantityInput,
+     el.commentKcal, el.commentProtein, el.commentFat, el.commentCarbs
     ].forEach(sanitizeDecimalInput);
 
     // Cloud sync settings
@@ -830,7 +867,10 @@ function wireEvents() {
     window.addEventListener('beforeunload', flushDayPush);
 
     document.addEventListener('keydown', e => {
-        if (e.key === 'Escape' && el.quantityModal.classList.contains('open')) closeSheet();
+        if (e.key === 'Escape') {
+            if (el.quantityModal.classList.contains('open')) closeSheet();
+            if (el.commentModal.classList.contains('open')) closeCommentModal();
+        }
     });
 }
 

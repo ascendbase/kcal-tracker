@@ -325,7 +325,6 @@ input[type=number] { -moz-appearance: textfield; appearance: textfield; }
 .log-row.editable { cursor: pointer; }
 .log-row.editable:active { background: rgba(255,255,255,.03); }
 .log-row.comment .lr-name { color: var(--t2); font-style: italic; }
-.log-row.comment .lr-kcal { display: none; }
 .lr-kcal { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; flex-shrink: 0; }
 .lr-del {
     width: 30px; height: 30px; border-radius: 50%;
