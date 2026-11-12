@@ -1039,19 +1039,24 @@ function getRecognition() {
             const t = e.results[i][0].transcript;
             if (e.results[i].isFinal) {
                 aiBuffer += (aiBuffer ? ' ' : '') + t.trim();
-                scheduleAiSilenceSend();
             } else {
                 interim += t;
             }
         }
         el.aiTranscript.textContent = (aiBuffer + (interim ? (aiBuffer ? ' ' : '') + interim : '')).trim();
+        // Reset the send timer on ANY speech activity (interim included). Chrome
+        // finalizes phrases late, so resetting only on finals could fire
+        // mid-sentence while the user is still talking. The command is only sent
+        // once the user has been quiet for 3 s (or taps the mic).
+        scheduleAiSilenceSend();
     };
     rec.onerror = e => {
-        if (e.error === 'aborted') return; // we stopped it ourselves
+        // 'no-speech' and 'network' happen during normal pauses / engine hiccups —
+        // never kill the session for them; onend keeps it alive.
+        if (e.error === 'aborted' || e.error === 'no-speech' || e.error === 'network') return;
         stopAiListening();
         const msg = e.error === 'not-allowed'
             ? 'Microphone blocked — allow it in browser settings'
-            : e.error === 'no-speech' ? 'No speech detected, try again'
             : `Voice input error: ${e.error}`;
         aiSetStatus(msg, 'err');
     };
@@ -1076,6 +1081,7 @@ function scheduleAiSilenceSend() {
     clearTimeout(aiSilenceTimer);
     aiSilenceTimer = setTimeout(() => {
         if (!aiListening) return;
+        if (aiBusy) { scheduleAiSilenceSend(); return; } // wait for the previous command to finish
         stopAiListening();
         const text = aiBuffer.trim();
         if (text) runAiCommand(text);
@@ -1106,7 +1112,7 @@ function toggleAiListening() {
     aiBuffer = '';
     clearTimeout(aiSilenceTimer);
     el.aiMic.classList.add('listening');
-    aiSetStatus('Dictate freely — pauses between items are fine. Tap mic to send.', 'listening');
+    aiSetStatus('Speak freely — it sends only after 3 s of silence or when you tap the mic.', 'listening');
     el.aiTranscript.textContent = '';
     try { rec.start(); } catch (e) { stopAiListening(); }
 }
