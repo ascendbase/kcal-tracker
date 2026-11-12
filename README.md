@@ -21,10 +21,9 @@ Minimal calorie & macro tracker with a personal food database and cloud sync.
 How it works:
 - Voice is captured by the browser's built-in speech recognition
   (Web Speech API — works in Chrome / Edge / Android; Safari/Firefox: type instead).
-  Dictation is **continuous**: pause between items freely — after 2 s of silence the
-  whole transcript is sent as one command (or tap the mic to send immediately).
-  A single browser recognition session is capped at ~60 s, so very long lists may
-  need two takes. OpenRouter serves **text models only** — the transcript (not audio)
+  Dictation is **continuous**: it never stops by itself — it sends the transcript
+  after **3 s of silence** or when you tap the mic again (a single browser recognition
+  session is capped at ~60 s, but it auto-restarts, so dictation continues). OpenRouter serves **text models only** — the transcript (not audio)
   is sent to OpenRouter, so it also works in Safari/Firefox via typing.
 - The model receives your current state (foods DB, today's log, BMR/activity/deficit)
   and returns structured JSON actions. The AI has full edit permissions:

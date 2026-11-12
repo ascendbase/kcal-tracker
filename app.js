@@ -1055,12 +1055,23 @@ function getRecognition() {
             : `Voice input error: ${e.error}`;
         aiSetStatus(msg, 'err');
     };
-    rec.onend = () => { if (aiListening) stopAiListening(); };
+    rec.onend = () => {
+        // Chrome ends recognition sessions on its own (network hiccups, engine
+        // resets, ~60 s cap). While the user is still dictating, restart so the
+        // mic never stops by itself — only silence (3 s) or a manual tap ends it.
+        if (aiListening && aiRecognition === rec) {
+            setTimeout(() => {
+                if (!aiListening || aiRecognition !== rec) return;
+                try { rec.start(); } catch (e) { /* already started or stopping */ }
+            }, 250);
+        }
+    };
     return rec;
 }
 
-// While dictating, every 2 s of silence after a final phrase sends the whole
-// buffer as one command — so you can list many foods, pausing naturally.
+// While dictating, keep listening until 3 s of silence after the last final
+// phrase, then send the whole buffer as one command — so long lists with
+// natural pauses between items are sent as a single command.
 function scheduleAiSilenceSend() {
     clearTimeout(aiSilenceTimer);
     aiSilenceTimer = setTimeout(() => {
@@ -1068,7 +1079,7 @@ function scheduleAiSilenceSend() {
         stopAiListening();
         const text = aiBuffer.trim();
         if (text) runAiCommand(text);
-    }, 2000);
+    }, 3000);
 }
 
 function toggleAiListening() {
@@ -1134,6 +1145,7 @@ Allowed actions (put any number of them in "actions", in order):
 - {"action":"clear_day"} — clear today's log.
 
 Rules:
+- The user often lists MANY foods in one message ("breakfast: 2 eggs, 60 g oatmeal, 200 ml milk, banana, coffee"). Create ONE action per food item — never merge several foods into one action, never log just the first item. Long lists of 20+ items are normal; output every single action.
 - If the user mentions a food that exists in the foods list, ALWAYS prefer log_food with the exact "name" from the list.
 - Quantities like "half", "a portion", "one serving" -> grams: use typical serving sizes (e.g. half of a typical cooked serving is about 150-200 g) and say so in the reply. "A bowl of X" when X is in the list -> estimate grams.
 - Never invent numbers for log_food — it only needs match + grams.
