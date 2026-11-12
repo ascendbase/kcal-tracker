@@ -411,6 +411,51 @@ input[type=number] { -moz-appearance: textfield; appearance: textfield; }
 .sheet-actions { display: flex; gap: 10px; }
 .sheet-actions .btn { flex: 1; }
 
+/* ---------- AI voice sheet ---------- */
+.ai-status {
+    text-align: center; font-size: 13.5px; font-weight: 600; color: var(--t2);
+    margin-bottom: 8px; min-height: 18px;
+}
+.ai-status.listening { color: var(--red); animation: syncpulse 1.2s ease-in-out infinite; }
+.ai-status.err { color: var(--red); }
+.ai-status.ok { color: var(--green); }
+.ai-status.busy { color: var(--orange); animation: syncpulse 1.2s ease-in-out infinite; }
+.ai-transcript {
+    min-height: 44px; margin-bottom: 12px; padding: 12px 14px;
+    background: rgba(255,255,255,.05); border-radius: var(--r-sm);
+    font-size: 15px; line-height: 1.4; color: var(--t1);
+    display: flex; align-items: center; justify-content: center; text-align: center;
+}
+.ai-transcript:empty { color: var(--t3); }
+.ai-mic {
+    width: 74px; height: 74px; margin: 0 auto 14px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--card-hi); color: var(--t1);
+    transition: transform .15s var(--ease), background .2s, color .2s;
+}
+.ai-mic svg { width: 30px; height: 30px; }
+.ai-mic:active { transform: scale(.9); background: rgba(255,255,255,.16); }
+.ai-mic.listening {
+    background: var(--red); color: #fff;
+    box-shadow: 0 0 0 10px rgba(255,69,58,.18);
+    animation: aipulse 1.4s ease-out infinite;
+}
+@keyframes aipulse {
+    0% { box-shadow: 0 0 0 0 rgba(255,69,58,.45); }
+    100% { box-shadow: 0 0 0 18px rgba(255,69,58,0); }
+}
+.ai-mic:disabled { opacity: .4; pointer-events: none; }
+.ai-row { display: flex; gap: 10px; margin-bottom: 12px; }
+.ai-row input {
+    flex: 1; min-width: 0;
+    background: rgba(255,255,255,.07); border: 0; border-radius: var(--r-md);
+    padding: 12px 14px; font-size: 15px; color: var(--t1);
+}
+.ai-row input::placeholder { color: var(--t3); }
+.ai-row .btn { flex-shrink: 0; }
+#aiExamples { margin-bottom: 12px; }
+#aiSettings { border-top: 1px solid var(--line); padding-top: 14px; }
+
 /* ---------- Toasts ---------- */
 .toasts {
     position: fixed; left: 50%; transform: translateX(-50%);

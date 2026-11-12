@@ -56,7 +56,10 @@ function cacheElements() {
      'dbToggle', 'dbBody', 'dbCount',
      'cloudBtn', 'syncDot', 'settingsModal',
      'supaUrl', 'supaKey', 'supaSave', 'supaDisconnect', 'settingsCancel',
-     'proteinPct', 'fatPct', 'carbsPct'
+     'proteinPct', 'fatPct', 'carbsPct',
+     'aiBtn', 'aiModal', 'aiStatus', 'aiTranscript', 'aiMic',
+     'aiTextInput', 'aiSend', 'aiExamples', 'aiSettingsToggle',
+     'aiClose', 'aiSettings', 'aiKey', 'aiModel'
     ].forEach(id => el[id] = document.getElementById(id));
 }
 
@@ -857,6 +860,26 @@ function wireEvents() {
 
     el.resetBtn.addEventListener('click', resetDay);
 
+    // AI voice module
+    el.aiBtn.addEventListener('click', openAiSheet);
+    el.aiClose.addEventListener('click', closeAiSheet);
+    el.aiMic.addEventListener('click', toggleAiListening);
+    el.aiSend.addEventListener('click', sendAiText);
+    el.aiTextInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); sendAiText(); }
+    });
+    el.aiSettingsToggle.addEventListener('click', () => {
+        const show = el.aiSettings.style.display === 'none';
+        el.aiSettings.style.display = show ? '' : 'none';
+        el.aiSettingsToggle.textContent = show ? 'Hide AI settings' : 'AI settings';
+        if (show) {
+            const cfg = loadAiCfg();
+            el.aiKey.value = cfg?.key || '';
+            el.aiModel.value = cfg?.model || '';
+        }
+    });
+    el.aiSettings.addEventListener('change', saveAiCfgFromInputs);
+
     // Cross-device sync: adopt cloud changes when the app regains focus,
     // and never lose a pending push when it loses focus / is closed.
     document.addEventListener('visibilitychange', () => {
@@ -870,6 +893,7 @@ function wireEvents() {
         if (e.key === 'Escape') {
             if (el.quantityModal.classList.contains('open')) closeSheet();
             if (el.commentModal.classList.contains('open')) closeCommentModal();
+            if (el.aiModal.classList.contains('open')) closeAiSheet();
         }
     });
 }
@@ -895,3 +919,412 @@ function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+/* ==========================================
+   AI voice module — Web Speech API (STT) +
+   OpenRouter chat completions (JSON actions)
+   ========================================== */
+const AI_CFG_KEY = 'kcal-ai-cfg';
+const AI_DEFAULT_MODEL = 'openai/gpt-4o-mini';
+let aiRecognition = null;   // active SpeechRecognition instance
+let aiListening = false;
+let aiBusy = false;
+
+function loadAiCfg() {
+    let cfg = null;
+    try { cfg = JSON.parse(localStorage.getItem(AI_CFG_KEY)) || null; } catch (e) { cfg = null; }
+    // Fall back to deployment env (env.js written at build time by build-env.js).
+    // Per-device key from the settings sheet wins over the env key.
+    const env = (typeof window !== 'undefined' && window.ENV) || {};
+    if (!cfg || !cfg.key) {
+        if (env.OPENROUTER_API_KEY) {
+            cfg = {
+                key: env.OPENROUTER_API_KEY,
+                model: cfg?.model || env.OPENROUTER_MODEL || AI_DEFAULT_MODEL
+            };
+        } else if (!cfg) {
+            cfg = null;
+        }
+    }
+    return cfg;
+}
+
+function saveAiCfg(cfg) {
+    try { localStorage.setItem(AI_CFG_KEY, JSON.stringify(cfg)); } catch (e) {}
+}
+
+function saveAiCfgFromInputs() {
+    const key = el.aiKey.value.trim();
+    const model = el.aiModel.value.trim();
+    if (!key) { toast('Enter an OpenRouter API key'); return; }
+    saveAiCfg({ key, model: model || AI_DEFAULT_MODEL });
+    toast('AI settings saved');
+}
+
+function openAiSheet() {
+    const cfg = loadAiCfg();
+    el.aiStatus.textContent = cfg?.key ? 'Tap the mic and speak' : 'Add your OpenRouter key in AI settings first';
+    el.aiStatus.className = 'ai-status';
+    el.aiTranscript.textContent = '';
+    el.aiTextInput.value = '';
+    if (!el.aiExamples.childElementCount) {
+        ['150 g chicken breast', 'breakfast: 2 eggs, 60 g oatmeal, 200 ml milk, one banana, coffee with milk',
+     'set BMR to 1750', 'remove the coffee', 'add a comment cheat meal, about 1200 kcal',
+     'add peanut butter, 590 kcal per 100 g'
+    ].forEach(t => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'chip';
+            b.textContent = t;
+            b.addEventListener('click', () => { el.aiTextInput.value = t; sendAiText(); });
+            el.aiExamples.appendChild(b);
+        });
+    }
+    el.aiModal.classList.add('open');
+}
+
+function closeAiSheet() {
+    stopAiListening();
+    el.aiModal.classList.remove('open');
+}
+
+function sendAiText() {
+    const text = el.aiTextInput.value.trim();
+    if (!text || aiBusy) return;
+    el.aiTextInput.value = '';
+    el.aiTranscript.textContent = text;
+    runAiCommand(text);
+}
+
+function aiSetStatus(msg, cls) {
+    el.aiStatus.textContent = msg;
+    el.aiStatus.className = cls ? 'ai-status ' + cls : 'ai-status';
+}
+
+// ---------- Speech recognition (browser STT) ----------
+let aiSilenceTimer = null; // auto-send after this much silence while dictating
+let aiBuffer = '';         // finalized text so far
+
+function getRecognition() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return null;
+    const rec = new SR();
+    rec.lang = navigator.language || 'en-US';
+    rec.interimResults = true;
+    // continuous mode: allows dictating many foods in one session (e.g. 20+ items).
+    // Browser engines cap a single recognition session (~60 s in Chrome) but the
+    // silence auto-send below normally fires well before that. Chrome also
+    // auto-restarts stopped sessions, which onend handling covers.
+    rec.continuous = true;
+    rec.maxAlternatives = 1;
+    rec.onresult = e => {
+        let interim = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+            const t = e.results[i][0].transcript;
+            if (e.results[i].isFinal) {
+                aiBuffer += (aiBuffer ? ' ' : '') + t.trim();
+                scheduleAiSilenceSend();
+            } else {
+                interim += t;
+            }
+        }
+        el.aiTranscript.textContent = (aiBuffer + (interim ? (aiBuffer ? ' ' : '') + interim : '')).trim();
+    };
+    rec.onerror = e => {
+        if (e.error === 'aborted') return; // we stopped it ourselves
+        stopAiListening();
+        const msg = e.error === 'not-allowed'
+            ? 'Microphone blocked — allow it in browser settings'
+            : e.error === 'no-speech' ? 'No speech detected, try again'
+            : `Voice input error: ${e.error}`;
+        aiSetStatus(msg, 'err');
+    };
+    rec.onend = () => { if (aiListening) stopAiListening(); };
+    return rec;
+}
+
+// While dictating, every 2 s of silence after a final phrase sends the whole
+// buffer as one command — so you can list many foods, pausing naturally.
+function scheduleAiSilenceSend() {
+    clearTimeout(aiSilenceTimer);
+    aiSilenceTimer = setTimeout(() => {
+        if (!aiListening) return;
+        stopAiListening();
+        const text = aiBuffer.trim();
+        if (text) runAiCommand(text);
+    }, 2000);
+}
+
+function toggleAiListening() {
+    if (aiListening) {
+        // manual stop: send whatever was captured so far
+        stopAiListening();
+        const text = aiBuffer.trim();
+        if (text) runAiCommand(text);
+        else aiSetStatus('Nothing captured — tap the mic and speak', 'err');
+        return;
+    }
+    if (aiBusy) return;
+    const cfg = loadAiCfg();
+    if (!cfg?.key) {
+        aiSetStatus('Add your OpenRouter key in AI settings first', 'err');
+        el.aiSettings.style.display = '';
+        el.aiSettingsToggle.textContent = 'Hide AI settings';
+        return;
+    }
+    const rec = getRecognition();
+    if (!rec) { aiSetStatus('Voice input not supported here — use Chrome / Edge, or type instead', 'err'); return; }
+    aiRecognition = rec;
+    aiListening = true;
+    aiBuffer = '';
+    clearTimeout(aiSilenceTimer);
+    el.aiMic.classList.add('listening');
+    aiSetStatus('Dictate freely — pauses between items are fine. Tap mic to send.', 'listening');
+    el.aiTranscript.textContent = '';
+    try { rec.start(); } catch (e) { stopAiListening(); }
+}
+
+function stopAiListening() {
+    aiListening = false;
+    clearTimeout(aiSilenceTimer);
+    aiSilenceTimer = null;
+    el.aiMic.classList.remove('listening');
+    if (aiRecognition) { try { aiRecognition.stop(); } catch (e) {} aiRecognition = null; }
+}
+
+// ---------- OpenRouter call ----------
+function aiStateSnapshot() {
+    return {
+        foods: state.foods.map(f => ({ id: f.id, name: f.name, kcal: f.kcal, protein: f.protein, fat: f.fat, carbs: f.carbs })), // per 100 g
+        log: state.log.map(i => ({ id: i.id, name: i.name, grams: i.grams || 0, kcal: +fmt(i.kcal, 0), protein: +fmt(i.protein), fat: +fmt(i.fat), carbs: +fmt(i.carbs) })),
+        bmr: state.bmr, activity: state.activity, deficit: state.deficit,
+        totals: { kcal: +fmt(computeTotals().kcal, 0) }
+    };
+}
+
+function aiSystemPrompt() {
+    return `You are the assistant inside a calorie tracker app. The user speaks casually (e.g. "had 150g chicken and some rice", "half the pasta left", "two eggs"). Respond ONLY with a JSON object, no markdown.
+
+Allowed actions (put any number of them in "actions", in order):
+- {"action":"log_food","match":"<name to find in foods list>","grams":<number>} — logs a food from the user's foods list (per-100 g values). Use when the food exists in the list.
+- {"action":"log_estimated","name":"<display name>","grams":<number or omit>,"kcal":<total kcal>,"protein":<g>,"fat":<g>,"carbs":<g>} — log food NOT in the list. Estimate macros from general nutrition knowledge for the WHOLE eaten amount. Always fill kcal; macros if you can.
+- {"action":"edit_log","match":"<name of logged entry>","index":<1-based position in log, optional>,"grams":<new grams, optional>,"kcal":<new total kcal, optional>,"protein":<g, optional>,"fat":<g, optional>,"carbs":<g, optional>} — change an existing logged entry. If only grams change, macros scale proportionally on the client; set kcal/macros only when the user says so.
+- {"action":"remove_log","match":"<name of logged entry>","index":<optional>} — remove matching logged entries (first match unless index given).
+- {"action":"add_food","name":"<name>","kcal":<per 100 g>,"protein":<per 100 g>,"fat":<per 100 g>,"carbs":<per 100 g>} — add to the foods database (per 100 g values).
+- {"action":"update_food","match":"<name in foods list>","kcal":<per 100 g>,"protein":<per 100 g>,"fat":<per 100 g>,"carbs":<per 100 g>} — update a database food (omit fields to keep them).
+- {"action":"delete_food","match":"<name in foods list>"} — remove from the foods database.
+- {"action":"add_comment","name":"<comment text>","kcal":<total kcal>,"protein":<g>,"fat":<g>,"carbs":<g>} — add a note-style entry (e.g. "coffee with milk", "cheat meal", "fasting day") with optional kcal/macros for the WHOLE item. Omit or use 0 for unknown macros. Also use this when the user explicitly says "add a comment/note".
+- {"action":"set_bmr","value":<number>} / {"action":"set_activity","value":<number>} / {"action":"set_deficit","value":<number>} — set TDEE inputs (kcal). "activity" is exercise kcal above BMR.
+- {"action":"clear_day"} — clear today's log.
+
+Rules:
+- If the user mentions a food that exists in the foods list, ALWAYS prefer log_food with the exact "name" from the list.
+- Quantities like "half", "a portion", "one serving" -> grams: use typical serving sizes (e.g. half of a typical cooked serving is about 150-200 g) and say so in the reply. "A bowl of X" when X is in the list -> estimate grams.
+- Never invent numbers for log_food — it only needs match + grams.
+- For log_estimated, kcal must be positive and realistic.
+- reply: short friendly confirmation of what you did or asked, <= 2 sentences, same language as the user.
+
+Response schema:
+{"reply":"...","actions":[{...}]}
+If the request is ambiguous or a food is not in the list and macros cannot be trusted, still reply and use the closest safe action or no actions.`;
+}
+
+async function runAiCommand(transcript) {
+    const cfg = loadAiCfg();
+    if (!cfg?.key) { aiSetStatus('Add your OpenRouter key in AI settings first', 'err'); return; }
+    aiBusy = true;
+    el.aiMic.disabled = true;
+    aiSetStatus('Thinking…', 'busy');
+    try {
+        const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${cfg.key}`,
+                'Content-Type': 'application/json',
+                'HTTP-Referer': location.origin || 'https://kcal-tracker.local',
+                'X-Title': 'Kcal Tracker'
+            },
+            body: JSON.stringify({
+                model: cfg.model || AI_DEFAULT_MODEL,
+                response_format: { type: 'json_object' },
+                messages: [
+                    { role: 'system', content: aiSystemPrompt() },
+                    { role: 'user', content: `Current app state:\n${JSON.stringify(aiStateSnapshot())}\n\nUser command: "${transcript}"` }
+                ]
+            })
+        });
+        if (!res.ok) {
+            const body = await res.text().catch(() => '');
+            throw new Error(res.status === 401 ? 'Invalid OpenRouter key'
+                : res.status === 402 ? 'OpenRouter: out of credits'
+                : `OpenRouter error ${res.status}${body ? ': ' + body.slice(0, 120) : ''}`);
+        }
+        const data = await res.json();
+        let content = data?.choices?.[0]?.message?.content;
+        if (!content) throw new Error('Empty AI response');
+        content = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+        const parsed = JSON.parse(content);
+        const applied = applyAiActions(Array.isArray(parsed.actions) ? parsed.actions : []);
+        aiSetStatus(parsed.reply || `Done — ${applied} change${applied === 1 ? '' : 's'}`, 'ok');
+        if (applied > 0) toast(`AI applied ${applied} change${applied === 1 ? '' : 's'}`);
+    } catch (e) {
+        console.warn('AI command failed:', e);
+        aiSetStatus(e.message || 'AI request failed', 'err');
+    } finally {
+        aiBusy = false;
+        el.aiMic.disabled = false;
+    }
+}
+
+// ---------- Apply actions (full edit permissions) ----------
+function aiNum(v, fallback = 0) {
+    const n = parseFloat(v);
+    return (!isNaN(n) && n >= 0) ? n : fallback;
+}
+
+function aiFindFood(match) {
+    const q = String(match || '').trim().toLowerCase();
+    if (!q) return null;
+    return state.foods.find(f => f.name.toLowerCase() === q)
+        || state.foods.find(f => f.name.toLowerCase().includes(q))
+        || state.foods.find(f => q.includes(f.name.toLowerCase()));
+}
+
+function aiFindLogEntry(match, index) {
+    const n = parseInt(index, 10);
+    if (Number.isInteger(n) && n >= 1 && n <= state.log.length) return state.log[n - 1];
+    const q = String(match || '').trim().toLowerCase();
+    if (!q) return null;
+    return state.log.find(i => i.name.toLowerCase().includes(q)) || null;
+}
+
+function applyAiActions(actions) {
+    let applied = 0;
+    let needRenderFoods = false, needRenderLog = false;
+
+    actions.forEach(a => {
+        if (!a || typeof a !== 'object') return;
+        switch (a.action) {
+            case 'log_food': {
+                const food = aiFindFood(a.match);
+                const g = aiNum(a.grams, 0);
+                if (!food || g <= 0) return;
+                const f = g / 100;
+                state.log.push({
+                    id: uid(), name: food.name, grams: g,
+                    kcal: food.kcal * f, protein: food.protein * f,
+                    fat: food.fat * f, carbs: food.carbs * f
+                });
+                needRenderLog = true; applied++;
+                break;
+            }
+            case 'log_estimated': {
+                const kcal = aiNum(a.kcal, 0);
+                const name = String(a.name || 'Food').trim();
+                if (!name || kcal <= 0) return;
+                state.log.push({
+                    id: uid(), name, grams: aiNum(a.grams, 0),
+                    kcal, protein: aiNum(a.protein, 0), fat: aiNum(a.fat, 0), carbs: aiNum(a.carbs, 0)
+                });
+                needRenderLog = true; applied++;
+                break;
+            }
+            case 'edit_log': {
+                const entry = aiFindLogEntry(a.match, a.index);
+                if (!entry) return;
+                const newGrams = a.grams != null ? aiNum(a.grams, -1) : null;
+                if (newGrams != null && newGrams > 0 && (entry.grams || 0) > 0) {
+                    const k = newGrams / entry.grams;
+                    entry.grams = newGrams;
+                    entry.kcal *= k; entry.protein *= k; entry.fat *= k; entry.carbs *= k;
+                }
+                if (a.kcal != null) entry.kcal = aiNum(a.kcal, entry.kcal);
+                if (a.protein != null) entry.protein = aiNum(a.protein, entry.protein);
+                if (a.fat != null) entry.fat = aiNum(a.fat, entry.fat);
+                if (a.carbs != null) entry.carbs = aiNum(a.carbs, entry.carbs);
+                needRenderLog = true; applied++;
+                break;
+            }
+            case 'remove_log': {
+                const entry = aiFindLogEntry(a.match, a.index);
+                if (!entry) return;
+                state.log = state.log.filter(i => i.id !== entry.id);
+                needRenderLog = true; applied++;
+                break;
+            }
+            case 'add_food': {
+                const name = String(a.name || '').trim();
+                const kcal = aiNum(a.kcal, -1);
+                if (!name || kcal < 0) return;
+                if (aiFindFood(name)) return; // duplicate — skip, like submitForm
+                const food = { id: uid(), name, kcal, protein: aiNum(a.protein, 0), fat: aiNum(a.fat, 0), carbs: aiNum(a.carbs, 0) };
+                state.foods.push(food);
+                needRenderFoods = true; applied++;
+                pushFood(food);
+                break;
+            }
+            case 'update_food': {
+                const food = aiFindFood(a.match);
+                if (!food) return;
+                if (a.kcal != null) food.kcal = aiNum(a.kcal, food.kcal);
+                if (a.protein != null) food.protein = aiNum(a.protein, food.protein);
+                if (a.fat != null) food.fat = aiNum(a.fat, food.fat);
+                if (a.carbs != null) food.carbs = aiNum(a.carbs, food.carbs);
+                needRenderFoods = true; needRenderLog = true; applied++;
+                pushFood(food);
+                break;
+            }
+            case 'delete_food': {
+                const food = aiFindFood(a.match);
+                if (!food) return;
+                state.foods = state.foods.filter(f => f.id !== food.id);
+                state.log = state.log.filter(i => i.name.toLowerCase() !== food.name.toLowerCase());
+                needRenderFoods = true; needRenderLog = true; applied++;
+                pushDelete(food.id);
+                break;
+            }
+            case 'add_comment': {
+                const name = String(a.name || '').trim();
+                if (!name) return;
+                state.log.push({
+                    id: uid(), comment: true, grams: 0, name,
+                    kcal: aiNum(a.kcal, 0), protein: aiNum(a.protein, 0),
+                    fat: aiNum(a.fat, 0), carbs: aiNum(a.carbs, 0)
+                });
+                needRenderLog = true; applied++;
+                break;
+            }
+            case 'set_bmr': {
+                const v = aiNum(a.value, -1);
+                if (v <= 0) return;
+                state.bmr = v;
+                el.bmrInput.value = v;
+                applied++;
+                break;
+            }
+            case 'set_activity':
+                state.activity = aiNum(a.value, 0);
+                el.activityInput.value = state.activity || '';
+                applied++;
+                break;
+            case 'set_deficit':
+                state.deficit = aiNum(a.value, 0);
+                el.deficitInput.value = state.deficit || '';
+                applied++;
+                break;
+            case 'clear_day':
+                if (state.log.length) applied++;
+                state.log = [];
+                needRenderLog = true;
+                break;
+        }
+    });
+
+    if (applied > 0) {
+        saveState(); // persists + debounced Supabase push of TDEE & log
+        if (needRenderFoods) renderFoods();
+        if (needRenderLog) renderLog();
+        updateTotals();
+    }
+    return applied;
+}
