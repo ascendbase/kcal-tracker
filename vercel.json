@@ -1,5 +1,3 @@
 {
-    "buildCommand": "node build-env.js",
-    "outputDirectory": ".",
     "cleanUrls": true
 }

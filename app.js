@@ -1169,29 +1169,40 @@ async function runAiCommand(transcript) {
     aiBusy = true;
     el.aiMic.disabled = true;
     aiSetStatus('Thinking…', 'busy');
+    const payload = {
+        model: cfg.model || AI_DEFAULT_MODEL,
+        messages: [
+            { role: 'system', content: aiSystemPrompt() },
+            { role: 'user', content: `Current app state:\n${JSON.stringify(aiStateSnapshot())}\n\nUser command: "${transcript}"` }
+        ]
+    };
     try {
-        const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        // Preferred: same-origin serverless proxy (/api/ai) — the key stays on
+        // the server. Falls back to a direct OpenRouter call (local key from
+        // AI settings) when the proxy doesn't exist, e.g. local file testing.
+        let res = await fetch('/api/ai', {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${cfg.key}`,
-                'Content-Type': 'application/json',
-                'HTTP-Referer': location.origin || 'https://kcal-tracker.local',
-                'X-Title': 'Kcal Tracker'
-            },
-            body: JSON.stringify({
-                model: cfg.model || AI_DEFAULT_MODEL,
-                response_format: { type: 'json_object' },
-                messages: [
-                    { role: 'system', content: aiSystemPrompt() },
-                    { role: 'user', content: `Current app state:\n${JSON.stringify(aiStateSnapshot())}\n\nUser command: "${transcript}"` }
-                ]
-            })
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
         });
+        if (res.status === 404) {
+            res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${cfg.key}`,
+                    'Content-Type': 'application/json',
+                    'HTTP-Referer': location.origin || 'https://kcal-tracker.local',
+                    'X-Title': 'Kcal Tracker'
+                },
+                body: JSON.stringify({ ...payload, response_format: { type: 'json_object' } })
+            });
+        }
         if (!res.ok) {
             const body = await res.text().catch(() => '');
             throw new Error(res.status === 401 ? 'Invalid OpenRouter key'
                 : res.status === 402 ? 'OpenRouter: out of credits'
-                : `OpenRouter error ${res.status}${body ? ': ' + body.slice(0, 120) : ''}`);
+                : res.status === 429 ? 'Rate limit — try again in a minute'
+                : `AI error ${res.status}${body ? ': ' + body.slice(0, 120) : ''}`);
         }
         const data = await res.json();
         let content = data?.choices?.[0]?.message?.content;

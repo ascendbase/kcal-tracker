@@ -60,15 +60,17 @@ python -m http.server 8000
 2. Push to a new GitHub repo
 3. Import the repo in Vercel (framework: Other, no build settings needed)
 
-### OpenRouter key on Vercel (optional)
+### OpenRouter key on Vercel (recommended setup)
 The AI works without any deploy config — each device can set its own key in the
-app's **AI settings** (stored in localStorage). Alternatively, bake a deployment-wide
-key at build time:
+app's **AI settings** (stored in that browser's localStorage). For a
+deployment-wide key, use the serverless proxy so the key is **never public**:
 1. Vercel project → **Settings → Environment Variables** → add
    `OPENROUTER_API_KEY` (and optionally `OPENROUTER_MODEL`, default `openai/gpt-4o-mini`)
-2. Redeploy — `vercel.json` runs `node build-env.js`, which writes the values
-   into `env.js`, loaded by the app as a fallback when no local key is set.
+2. Redeploy — the frontend calls the same-origin `/api/ai` function
+   (`api/ai.js`), which forwards requests to OpenRouter with the key kept
+   server-side. No key ever appears in served JS.
+3. If `/api/ai` isn't available (e.g. opened as a local file), the app falls
+   back to a direct OpenRouter call using the per-device key from AI settings.
 
-⚠️ This is a static site: any key baked into `env.js` is **visible in the served
-JS** to anyone who opens the site. Fine for a personal tracker only you use —
-otherwise prefer the per-device key or a paid, capped OpenRouter key.
+⚠️ Never bake the key into static files. The proxy endpoint itself is public
+(best-effort 30 req/h per IP rate limit) — set a spend limit on the OpenRouter key.
