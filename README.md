@@ -14,7 +14,9 @@ Minimal calorie & macro tracker with a personal food database and cloud sync.
 1. Get a key at [openrouter.ai/keys](https://openrouter.ai/keys)
 2. Tap the **mic icon** (top bar) → *AI settings* → paste your key
    (optionally change the model, default `openai/gpt-4o-mini`) → it saves automatically
-3. Tap the mic and speak, or type a command
+3. Pick the **voice input language** (Auto / English / Русский / Українська) in the
+   same settings — the AI replies in whatever language you speak
+4. Tap the mic and speak, or type a command
 
 How it works:
 - Voice is captured by the browser's built-in speech recognition

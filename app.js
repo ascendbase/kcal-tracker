@@ -59,7 +59,7 @@ function cacheElements() {
      'proteinPct', 'fatPct', 'carbsPct',
      'aiBtn', 'aiModal', 'aiStatus', 'aiTranscript', 'aiMic',
      'aiTextInput', 'aiSend', 'aiExamples', 'aiSettingsToggle',
-     'aiClose', 'aiSettings', 'aiKey', 'aiModel'
+     'aiClose', 'aiSettings', 'aiKey', 'aiLang', 'aiModel'
     ].forEach(id => el[id] = document.getElementById(id));
 }
 
@@ -876,6 +876,7 @@ function wireEvents() {
             const cfg = loadAiCfg();
             el.aiKey.value = cfg?.key || '';
             el.aiModel.value = cfg?.model || '';
+            el.aiLang.value = cfg?.lang || '';
         }
     });
     el.aiSettings.addEventListener('change', saveAiCfgFromInputs);
@@ -956,8 +957,16 @@ function saveAiCfg(cfg) {
 function saveAiCfgFromInputs() {
     const key = el.aiKey.value.trim();
     const model = el.aiModel.value.trim();
+    const lang = el.aiLang.value || '';
+    const existing = loadAiCfg();
+    if (!key && existing?.key) {
+        // key already set (possibly via env) — just update model / language
+        saveAiCfg({ key: existing.key, model: model || existing.model || AI_DEFAULT_MODEL, lang });
+        toast('AI settings saved');
+        return;
+    }
     if (!key) { toast('Enter an OpenRouter API key'); return; }
-    saveAiCfg({ key, model: model || AI_DEFAULT_MODEL });
+    saveAiCfg({ key, model: model || AI_DEFAULT_MODEL, lang });
     toast('AI settings saved');
 }
 
@@ -1005,11 +1014,18 @@ function aiSetStatus(msg, cls) {
 let aiSilenceTimer = null; // auto-send after this much silence while dictating
 let aiBuffer = '';         // finalized text so far
 
+// Voice recognition language: user-selected in AI settings, else the browser's
+// locale. The transcript goes to OpenRouter, which replies in the user's language.
+function getAiLang() {
+    const cfg = loadAiCfg();
+    return (cfg && cfg.lang) || navigator.language || 'en-US';
+}
+
 function getRecognition() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return null;
     const rec = new SR();
-    rec.lang = navigator.language || 'en-US';
+    rec.lang = getAiLang();
     rec.interimResults = true;
     // continuous mode: allows dictating many foods in one session (e.g. 20+ items).
     // Browser engines cap a single recognition session (~60 s in Chrome) but the

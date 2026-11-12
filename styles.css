@@ -168,7 +168,7 @@ input[type=number] { -moz-appearance: textfield; appearance: textfield; }
 /* ---------- Settings sheet fields ---------- */
 .set-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
 .set-field label { font-size: 12px; font-weight: 700; color: var(--t2); letter-spacing: .3px; }
-.set-field input {
+.set-field input, .set-field select {
     width: 100%;
     background: rgba(255,255,255,.07);
     border: 1px solid transparent;
@@ -177,7 +177,9 @@ input[type=number] { -moz-appearance: textfield; appearance: textfield; }
     font-size: 15px; color: var(--t1);
     transition: background .2s, border-color .2s;
 }
-.set-field input:focus { background: rgba(255,255,255,.11); border-color: rgba(255,255,255,.2); }
+.set-field select { appearance: none; -webkit-appearance: none; cursor: pointer; }
+.set-field select option { background: #1c1c1e; color: #fff; }
+.set-field input:focus, .set-field select:focus { background: rgba(255,255,255,.11); border-color: rgba(255,255,255,.2); }
 .set-field input::placeholder { color: var(--t3); }
 .set-note {
     font-size: 12px; line-height: 1.5; color: var(--t3);
