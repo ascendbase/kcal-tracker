@@ -59,7 +59,7 @@ function cacheElements() {
      'proteinPct', 'fatPct', 'carbsPct',
      'aiBtn', 'aiModal', 'aiStatus', 'aiTranscript', 'aiMic',
      'aiTextInput', 'aiSend', 'aiExamples', 'aiSettingsToggle',
-     'aiClose', 'aiSettings', 'aiKey', 'aiLang', 'aiModel'
+     'aiClose', 'aiSettings', 'aiLang'
     ].forEach(id => el[id] = document.getElementById(id));
 }
 
@@ -871,13 +871,8 @@ function wireEvents() {
     el.aiSettingsToggle.addEventListener('click', () => {
         const show = el.aiSettings.style.display === 'none';
         el.aiSettings.style.display = show ? '' : 'none';
-        el.aiSettingsToggle.textContent = show ? 'Hide AI settings' : 'AI settings';
-        if (show) {
-            const cfg = loadAiCfg();
-            el.aiKey.value = cfg?.key || '';
-            el.aiModel.value = cfg?.model || '';
-            el.aiLang.value = cfg?.lang || '';
-        }
+        el.aiSettingsToggle.textContent = show ? 'Hide settings' : 'Voice language';
+        if (show) el.aiLang.value = loadAiCfg()?.lang || '';
     });
     el.aiSettings.addEventListener('change', saveAiCfgFromInputs);
 
@@ -955,27 +950,19 @@ function saveAiCfg(cfg) {
 }
 
 function saveAiCfgFromInputs() {
-    const key = el.aiKey.value.trim();
-    const model = el.aiModel.value.trim();
-    const lang = el.aiLang.value || '';
+    // Only the voice language is user-configurable; the OpenRouter key/model
+    // live on the server (Vercel env vars, used by the /api/ai proxy).
     const existing = loadAiCfg();
-    if (!key && existing?.key) {
-        // key already set (possibly via env) — just update model / language
-        saveAiCfg({ key: existing.key, model: model || existing.model || AI_DEFAULT_MODEL, lang });
-        toast('AI settings saved');
-        return;
-    }
-    if (!key) { toast('Enter an OpenRouter API key'); return; }
-    saveAiCfg({ key, model: model || AI_DEFAULT_MODEL, lang });
-    toast('AI settings saved');
+    saveAiCfg({ lang: el.aiLang.value || '', model: existing?.model || '', key: existing?.key || '' });
+    toast('Voice language saved');
 }
 
 function openAiSheet() {
-    const cfg = loadAiCfg();
-    el.aiStatus.textContent = cfg?.key ? 'Tap the mic and speak' : 'Add your OpenRouter key in AI settings first';
+    el.aiStatus.textContent = 'Tap the mic and speak';
     el.aiStatus.className = 'ai-status';
     el.aiTranscript.textContent = '';
     el.aiTextInput.value = '';
+    el.aiLang.value = loadAiCfg()?.lang || '';
     if (!el.aiExamples.childElementCount) {
         ['150 g chicken breast', 'breakfast: 2 eggs, 60 g oatmeal, 200 ml milk, one banana, coffee with milk',
      'set BMR to 1750', 'remove the coffee', 'add a comment cheat meal, about 1200 kcal',
@@ -1098,15 +1085,8 @@ function toggleAiListening() {
         return;
     }
     if (aiBusy) return;
-    const cfg = loadAiCfg();
-    if (!cfg?.key) {
-        aiSetStatus('Add your OpenRouter key in AI settings first', 'err');
-        el.aiSettings.style.display = '';
-        el.aiSettingsToggle.textContent = 'Hide AI settings';
-        return;
-    }
     const rec = getRecognition();
-    if (!rec) { aiSetStatus('Voice input not supported here — use Chrome / Edge, or type instead', 'err'); return; }
+    if (!rec) { aiSetStatus('Voice input not supported here — use Chrome / Edge / Safari, or type instead', 'err'); return; }
     aiRecognition = rec;
     aiListening = true;
     aiBuffer = '';
@@ -1165,27 +1145,30 @@ If the request is ambiguous or a food is not in the list and macros cannot be tr
 
 async function runAiCommand(transcript) {
     const cfg = loadAiCfg();
-    if (!cfg?.key) { aiSetStatus('Add your OpenRouter key in AI settings first', 'err'); return; }
     aiBusy = true;
     el.aiMic.disabled = true;
     aiSetStatus('Thinking…', 'busy');
     const payload = {
-        model: cfg.model || AI_DEFAULT_MODEL,
+        model: cfg?.model || AI_DEFAULT_MODEL,
         messages: [
             { role: 'system', content: aiSystemPrompt() },
             { role: 'user', content: `Current app state:\n${JSON.stringify(aiStateSnapshot())}\n\nUser command: "${transcript}"` }
         ]
     };
     try {
-        // Preferred: same-origin serverless proxy (/api/ai) — the key stays on
-        // the server. Falls back to a direct OpenRouter call (local key from
-        // AI settings) when the proxy doesn't exist, e.g. local file testing.
+        // Primary path: same-origin serverless proxy (/api/ai) — the OpenRouter
+        // key + model live in Vercel env vars, nothing user-facing. Fallback to a
+        // direct call with a locally stored key only when the proxy doesn't exist
+        // (e.g. index.html opened from disk without a server).
         let res = await fetch('/api/ai', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
         if (res.status === 404) {
+            if (!cfg?.key) {
+                throw new Error('AI proxy not available — open the deployed site (Vercel URL)');
+            }
             res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
                 method: 'POST',
                 headers: {

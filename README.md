@@ -11,12 +11,11 @@ Minimal calorie & macro tracker with a personal food database and cloud sync.
 - **Supabase cloud sync** of the foods database across devices
 
 ## AI voice logging (OpenRouter)
-1. Get a key at [openrouter.ai/keys](https://openrouter.ai/keys)
-2. Tap the **mic icon** (top bar) → *AI settings* → paste your key
-   (optionally change the model, default `openai/gpt-4o-mini`) → it saves automatically
-3. Pick the **voice input language** (Auto / English / Русский / Українська) in the
-   same settings — the AI replies in whatever language you speak
-4. Tap the mic and speak, or type a command
+1. Configure the key once on the server: Vercel → project → Settings →
+   Environment Variables → `OPENROUTER_API_KEY` (see below) → redeploy
+2. Tap the **mic icon** (top bar) and speak, or type a command — no setup in the UI
+3. Optionally pick the **voice input language** (Auto / English / Русский /
+   Українська) in the AI sheet — the AI replies in whatever language you speak
 
 How it works:
 - Voice is captured by the browser's built-in speech recognition
@@ -60,17 +59,14 @@ python -m http.server 8000
 2. Push to a new GitHub repo
 3. Import the repo in Vercel (framework: Other, no build settings needed)
 
-### OpenRouter key on Vercel (recommended setup)
-The AI works without any deploy config — each device can set its own key in the
-app's **AI settings** (stored in that browser's localStorage). For a
-deployment-wide key, use the serverless proxy so the key is **never public**:
-1. Vercel project → **Settings → Environment Variables** → add
-   `OPENROUTER_API_KEY` (and optionally `OPENROUTER_MODEL`, default `openai/gpt-4o-mini`)
-2. Redeploy — the frontend calls the same-origin `/api/ai` function
-   (`api/ai.js`), which forwards requests to OpenRouter with the key kept
-   server-side. No key ever appears in served JS.
-3. If `/api/ai` isn't available (e.g. opened as a local file), the app falls
-   back to a direct OpenRouter call using the per-device key from AI settings.
+### OpenRouter key on Vercel
+The AI needs zero configuration in the UI: the app calls the same-origin
+`/api/ai` serverless function (`api/ai.js`), which forwards requests to
+OpenRouter using `OPENROUTER_API_KEY` / `OPENROUTER_MODEL` from the Vercel
+project's environment variables. The key is never exposed to the browser.
+The only user-facing AI setting is the voice input language.
+(If the app is opened without a server — e.g. straight from disk — the proxy
+isn't reachable and voice AI won't work; use the deployed URL.)
 
-⚠️ Never bake the key into static files. The proxy endpoint itself is public
-(best-effort 30 req/h per IP rate limit) — set a spend limit on the OpenRouter key.
+⚠️ The proxy endpoint itself is public (best-effort 30 req/h per IP rate
+limit) — set a spend limit on the OpenRouter key.
