@@ -526,3 +526,6 @@ input[type=number] { -moz-appearance: textfield; appearance: textfield; }
 .gh-del svg { width: 12px; height: 12px; }
 .gh-del:active { color: var(--red); transform: scale(.85); }
 .log-row.in-group { padding-left: 14px; }
+.log-row { touch-action: pan-y; -webkit-user-select: none; user-select: none; }
+.log-row.dragging { opacity: .45; }
+.group-head.drag-target { background: var(--card-hi); border-radius: var(--r-sm); }

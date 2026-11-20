@@ -53,7 +53,7 @@ function cacheElements() {
      'previewKcal', 'previewProtein', 'previewFat', 'previewCarbs',
      'modalCancel', 'modalConfirm', 'toastContainer',
      'commentModal', 'commentTitle', 'commentName', 'commentKcal', 'commentProtein',
-     'commentFat', 'commentCarbs', 'commentCancel', 'commentSave',
+     'commentFat', 'commentCarbs', 'commentGroup', 'commentCancel', 'commentSave',
      'dbToggle', 'dbBody', 'dbCount',
      'cloudBtn', 'syncDot', 'settingsModal',
      'supaUrl', 'supaKey', 'supaSave', 'supaDisconnect', 'settingsCancel',
@@ -143,28 +143,29 @@ function removeGroup(id) {
 
 // Fill the group <select> in the quantity sheet.
 // preselect === undefined → default to the group of the most recent entry.
-function fillGroupSelect(preselect) {
-    if (!el.qtyGroup) return;
+function fillGroupSelect(preselect, sel = el.qtyGroup) {
+    if (!sel) return;
     const wanted = preselect !== undefined
         ? preselect
         : (state.log.length ? (state.log[state.log.length - 1].groupId || '') : '');
-    el.qtyGroup.innerHTML = '';
+    sel.innerHTML = '';
     const none = document.createElement('option');
     none.value = '';
     none.textContent = 'No group';
-    el.qtyGroup.appendChild(none);
+    sel.appendChild(none);
     state.groups.forEach(g => {
         const o = document.createElement('option');
         o.value = g.id;
         o.textContent = g.name;
-        el.qtyGroup.appendChild(o);
+        sel.appendChild(o);
     });
     const newOpt = document.createElement('option');
     newOpt.value = '__new';
     newOpt.textContent = '＋ New group…';
-    el.qtyGroup.appendChild(newOpt);
-    el.qtyGroup.value = state.groups.some(g => g.id === wanted) ? wanted : '';
+    sel.appendChild(newOpt);
+    sel.value = state.groups.some(g => g.id === wanted) ? wanted : '';
 }
+
 // ---------- Food database rendering ----------
 function filteredFoods() {
     const q = el.searchInput.value.trim().toLowerCase();
@@ -249,6 +250,7 @@ function renderLog() {
                 : 'comment';
             row.querySelector('.lr-kcal').textContent = (entry.kcal || 0) > 0 ? `${fmt(entry.kcal, 0)} kcal` : '';
             row.addEventListener('click', e => {
+                if (suppressNextRowClick) { suppressNextRowClick = false; return; }
                 if (e.target.closest('.lr-del')) return;
                 openCommentModal(entry.id);
             });
@@ -257,11 +259,13 @@ function renderLog() {
             row.querySelector('.lr-meta').textContent = `${fmt(entry.grams, 0)} g · P ${fmt(entry.protein)} · F ${fmt(entry.fat)} · C ${fmt(entry.carbs)}`;
             row.querySelector('.lr-kcal').textContent = `${fmt(entry.kcal, 0)} kcal`;
             row.addEventListener('click', e => {
+                if (suppressNextRowClick) { suppressNextRowClick = false; return; }
                 if (e.target.closest('.lr-del')) return;
                 openEditSheet(entry.id);
             });
         }
         row.querySelector('.lr-del').addEventListener('click', () => removeLog(entry.id));
+        row.addEventListener('pointerdown', e => startLogDrag(entry, row, e));
         return row;
     };
 
@@ -317,6 +321,74 @@ function renderLog() {
     });
 }
 
+// ---------- Drag & drop: move logged entries into/out of groups ----------
+// Pointer-based so it works on touch: start a drag by moving a log row
+// sideways ~10px (vertical scroll stays native thanks to touch-action: pan-y).
+let dragState = null;
+let suppressNextRowClick = false;
+
+function dragCleanup() {
+    if (!dragState) return;
+    document.querySelectorAll('.drag-target').forEach(n => n.classList.remove('drag-target'));
+    if (dragState.row) dragState.row.classList.remove('dragging');
+    if (dragState.moved) suppressNextRowClick = true;
+    dragState = null;
+}
+
+function dragMove(x, y) {
+    if (!dragState) return;
+    if (!dragState.moved && Math.hypot(x - dragState.x0, y - dragState.y0) < 10) return;
+    dragState.moved = true;
+    dragState.row.classList.add('dragging');
+    dragState.lx = x; dragState.ly = y;
+    document.querySelectorAll('.drag-target').forEach(n => n.classList.remove('drag-target'));
+    const over = document.elementFromPoint(x, y);
+    const head = over && over.closest ? over.closest('.group-head') : null;
+    if (head) head.classList.add('drag-target');
+}
+
+function dragDrop(x, y) {
+    const s = dragState;
+    if (!s) return;
+    let head = null;
+    if (s.moved) {
+        const over = document.elementFromPoint(x, y);
+        head = over && over.closest ? over.closest('.group-head') : null;
+    }
+    dragCleanup();
+    if (!s.moved) return;
+    const entry = state.log.find(i => i.id === s.id);
+    if (!entry) return;
+    if (head) {
+        const g = state.groups.find(x => x.id === head.dataset.id);
+        if (g && entry.groupId !== g.id) {
+            entry.groupId = g.id;
+            saveState(); renderLog();
+            toast(entry.name + ' → ' + g.name);
+        }
+    } else if (entry.groupId) {
+        delete entry.groupId;
+        saveState(); renderLog();
+        toast(entry.name + ' ungrouped');
+    }
+}
+
+function startLogDrag(entry, row, e) {
+    if (e.button != null && e.button !== 0) return;
+    dragState = { id: entry.id, row, x0: e.clientX, y0: e.clientY, moved: false, lx: e.clientX, ly: e.clientY };
+    const mv = ev => dragMove(ev.clientX, ev.clientY);
+    const up = ev => {
+        window.removeEventListener('pointermove', mv);
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+        if (ev.type === 'pointercancel') { dragCleanup(); return; } // browser took over (scroll) — no action
+        dragDrop(ev.clientX, ev.clientY);
+    };
+    window.addEventListener('pointermove', mv);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+}
+
 let commentEditId = null;
 
 function openCommentModal(id) {
@@ -328,6 +400,7 @@ function openCommentModal(id) {
     el.commentProtein.value = entry && entry.protein > 0 ? entry.protein : '';
     el.commentFat.value = entry && entry.fat > 0 ? entry.fat : '';
     el.commentCarbs.value = entry && entry.carbs > 0 ? entry.carbs : '';
+    fillGroupSelect(entry ? (entry.groupId || '') : undefined, el.commentGroup);
     el.commentModal.classList.add('open');
     setTimeout(() => el.commentName.focus(), 380);
 }
@@ -355,13 +428,14 @@ function saveComment() {
         const entry = state.log.find(i => i.id === commentEditId);
         if (entry) {
             Object.assign(entry, data);
+            entry.groupId = el.commentGroup.value || null;
             saveState();
             renderLog();
             updateTotals();
             toast('Comment updated');
         }
     } else {
-        state.log.push({ id: uid(), comment: true, grams: 0, ...data });
+        state.log.push({ id: uid(), comment: true, grams: 0, groupId: el.commentGroup.value || null, ...data });
         saveState();
         renderLog();
         updateTotals();
