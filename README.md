@@ -39,7 +39,7 @@ How it works:
 ## Cloud sync (Supabase)
 1. Create a free project at [supabase.com](https://supabase.com)
 2. Dashboard → **SQL Editor** → paste & run [`supabase.sql`](supabase.sql)
-3. Re-run [supabase.sql](supabase.sql) if your `day` table predates groups (adds a `groups` jsonb column)
+3. (Optional) Re-run [supabase.sql](supabase.sql) if your `day` table predates groups — it adds a `groups` jsonb column so groups sync across devices. Without it, everything still works and groups simply stay on the device that created them.
 4. Open the app → tap the **cloud icon** (top bar) → paste your
    **Project URL** and **anon public key** → *Save & sync*
 

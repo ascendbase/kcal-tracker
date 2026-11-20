@@ -743,15 +743,32 @@ function scheduleDayPush() {
     dayPushTimer = setTimeout(() => pushDay(sig), 800);
 }
 
+
+// The groups column is OPTIONAL: databases created before grouping don't have
+// it. We try to send groups; if the column is missing we remember that (per
+// session) and keep pushing without it — groups just stay on this device.
+let dayNoGroupsColumn = false;
+
 async function pushDay(sig) {
     const client = getClient();
     if (!client) return;
     try {
         const ts = new Date().toISOString();
-        const { error } = await client.from('day').upsert({
-            id: 'day', bmr: state.bmr, activity: state.activity, deficit: state.deficit, log: state.log, groups: state.groups, updated_at: ts
-        });
-        if (error) throw error;
+        const row = {
+            id: 'day', bmr: state.bmr, activity: state.activity,
+            deficit: state.deficit, log: state.log, updated_at: ts
+        };
+        if (!dayNoGroupsColumn) row.groups = state.groups;
+        const { error } = await client.from('day').upsert(row);
+        if (error && !dayNoGroupsColumn && /groups/i.test(error.message || '')) {
+            // Older schema without the groups column — retry without it
+            dayNoGroupsColumn = true;
+            delete row.groups;
+            const { error: e2 } = await client.from('day').upsert(row);
+            if (e2) throw e2;
+        } else if (error) {
+            throw error;
+        }
         lastDaySig = sig;
         state.daySavedAt = Date.parse(ts);
         try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
@@ -794,7 +811,8 @@ async function pullDay() {
             state.activity = data.activity == null ? 0 : +data.activity;
             state.deficit = data.deficit == null ? 0 : +data.deficit;
             state.log = Array.isArray(data.log) ? data.log : [];
-            state.groups = Array.isArray(data.groups) ? data.groups : [];
+            // Only adopt groups when the column exists — a schema without it must not wipe local groups
+            if (Array.isArray(data.groups)) state.groups = data.groups;
             state.daySavedAt = cloudTs;
             lastDaySig = daySig();
             try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
