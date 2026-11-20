@@ -210,6 +210,15 @@ function renderFoods() {
         `;
         row.querySelector('.fr-name').textContent = food.name;
         row.addEventListener('click', () => openSheet(food));
+        row.querySelector('.fr-del').addEventListener('click', e => {
+            e.stopPropagation(); // don't open the quantity sheet
+            deleteFood(food.id, food.name);
+        });
+        list.appendChild(row);
+    });
+}
+
+// ---------- Log rendering ----------
 function renderLog() {
     const list = el.loggedList;
     const n = state.log.length;
@@ -307,17 +316,6 @@ function renderLog() {
         list.appendChild(makeRow(entry));
     });
 }
-        row.querySelector('.fr-del').addEventListener('click', e => {
-            e.stopPropagation(); // don't open the quantity sheet
-            deleteFood(food.id, food.name);
-        });
-        list.appendChild(row);
-    });
-}
-
-// ---------- Log rendering ----------
-
-// ---------- Comment (note with optional kcal / macros) ----------
 
 let commentEditId = null;
 
