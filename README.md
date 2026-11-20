@@ -4,6 +4,7 @@ Minimal calorie & macro tracker with a personal food database and cloud sync.
 
 ## Features
 - Log foods with grams; live totals for kcal / protein / fat / carbs
+- Optional named **groups** (meals) in the day log with per-group kcal + macro totals
 - TDEE input with deficit / surplus indicator
 - Personal food database (per-100 g values), searchable, collapsible panel
 - Decimal-safe inputs (0.3 works with dot, comma auto-converts)
@@ -32,12 +33,14 @@ How it works:
   - Edit / remove log entries, clear the day
   - Add / update / delete foods in the database (synced to Supabase)
   - Set BMR, Activity and Deficit
+  - Create / rename groups and move entries between them — a meal prefix ("breakfast: 2 eggs, …") auto-creates the group and puts every food from that command into it
 - Every action is applied locally instantly and synced via the normal save/push path.
 
 ## Cloud sync (Supabase)
 1. Create a free project at [supabase.com](https://supabase.com)
 2. Dashboard → **SQL Editor** → paste & run [`supabase.sql`](supabase.sql)
-3. Open the app → tap the **cloud icon** (top bar) → paste your
+3. Re-run [supabase.sql](supabase.sql) if your `day` table predates groups (adds a `groups` jsonb column)
+4. Open the app → tap the **cloud icon** (top bar) → paste your
    **Project URL** and **anon public key** → *Save & sync*
 
 How it behaves:

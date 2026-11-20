@@ -42,6 +42,7 @@ create table if not exists public.day (
 alter table public.day add column if not exists bmr numeric;
 alter table public.day add column if not exists activity numeric default 0;
 alter table public.day add column if not exists deficit numeric default 0;
+alter table public.day add column if not exists groups jsonb not null default '[]'::jsonb;
 
 alter table public.day enable row level security;
 

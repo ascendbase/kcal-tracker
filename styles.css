@@ -488,3 +488,41 @@ input[type=number] { -moz-appearance: textfield; appearance: textfield; }
 @media (prefers-reduced-motion: reduce) {
     * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+
+/* ---------- Groups (meal sections) ---------- */
+.group-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 2px 8px;
+    border-bottom: 1px solid var(--line);
+    margin-top: 8px;
+}
+.group-head:first-child { margin-top: 0; }
+.gh-toggle {
+    width: 26px; height: 26px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--t3); flex-shrink: 0;
+    transition: transform .15s var(--ease), background .15s;
+}
+.gh-toggle:active { background: var(--card-hi); transform: scale(.88); }
+.group-head .chev { width: 14px; height: 14px; transition: transform .25s var(--ease); }
+.group-head:not(.open) .chev { transform: rotate(-90deg); }
+.gh-name {
+    flex: 1; min-width: 0;
+    font-size: 14px; font-weight: 700; color: var(--t1);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    cursor: pointer;
+}
+.gh-totals {
+    font-size: 12px; font-weight: 600; color: var(--t2);
+    font-variant-numeric: tabular-nums; text-align: right; flex-shrink: 0;
+}
+.gh-del {
+    width: 26px; height: 26px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--t3); flex-shrink: 0;
+    transition: transform .15s var(--ease), color .15s;
+}
+.gh-del svg { width: 12px; height: 12px; }
+.gh-del:active { color: var(--red); transform: scale(.85); }
+.log-row.in-group { padding-left: 14px; }

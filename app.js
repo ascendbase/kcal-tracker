@@ -11,7 +11,8 @@ let state = {
     dbOpen: true, // collapsible "Foods" panel open by default
     daySavedAt: 0, // last synced day-state timestamp (ms)
     foods: [],   // user-created: { id, name, kcal, protein, fat, carbs } per 100g
-    log: []      // { id, name, grams, kcal, protein, fat, carbs }
+    log: [],     // { id, name, grams, kcal, protein, fat, carbs, groupId? }
+    groups: []   // per-day meal groups: { id, name, open } — log entries reference via groupId
 };
 
 // ---------- Decimal input sanitizer (comma -> dot, digits only) ----------
@@ -41,14 +42,14 @@ function sanitizeDecimalInput(input) {
 
 const el = {};
 function cacheElements() {
-    ['bmrInput', 'activityInput', 'deficitInput', 'addCommentBtn', 'searchInput', 'searchClear', 'foodList', 'customFoodForm',
+    ['bmrInput', 'activityInput', 'deficitInput', 'addCommentBtn', 'addGroupBtn', 'searchInput', 'searchClear', 'foodList', 'customFoodForm',
      'customName', 'customKcal', 'customProtein', 'customFat', 'customCarbs',
      'cancelCustom', 'addCustomBtn', 'loggedList', 'loggedCount', 'emptyState',
      'totalKcal', 'totalProtein', 'totalFat', 'totalCarbs',
      'balanceCard', 'balanceChip', 'balanceValue', 'balanceLabel',
      'macroBar', 'proteinSegment', 'fatSegment', 'carbsSegment',
      'resetBtn', 'quantityModal', 'modalFoodName', 'modalFoodMacros',
-     'quantityInput', 'qtyMinus', 'qtyPlus', 'quickAmounts',
+     'quantityInput', 'qtyMinus', 'qtyPlus', 'quickAmounts', 'qtyGroup',
      'previewKcal', 'previewProtein', 'previewFat', 'previewCarbs',
      'modalCancel', 'modalConfirm', 'toastContainer',
      'commentModal', 'commentTitle', 'commentName', 'commentKcal', 'commentProtein',
@@ -79,6 +80,7 @@ function loadState() {
             state.deficit = typeof p.deficit === 'number' ? p.deficit : 0;
             state.foods = Array.isArray(p.foods) ? p.foods : [];
             state.log = Array.isArray(p.log) ? p.log : [];
+            state.groups = Array.isArray(p.groups) ? p.groups : [];
             state.dbOpen = typeof p.dbOpen === 'boolean' ? p.dbOpen : true;
             state.daySavedAt = typeof p.daySavedAt === 'number' ? p.daySavedAt : 0;
         }
@@ -113,6 +115,55 @@ function computeTotals() {
         fat: a.fat + i.fat,
         carbs: a.carbs + i.carbs
     }), { kcal: 0, protein: 0, fat: 0, carbs: 0 });
+}
+// ---------- Groups (meal sections in the day log) ----------
+function getGroup(id) {
+    return state.groups.find(g => g.id === id) || null;
+}
+
+// Create-or-reuse (case-insensitive) — shared by the UI, the ＋ Group button and the AI
+function ensureGroup(name) {
+    const n = String(name || '').trim();
+    if (!n) return null;
+    let g = state.groups.find(x => x.name.toLowerCase() === n.toLowerCase());
+    if (!g) {
+        g = { id: uid(), name: n, open: true };
+        state.groups.push(g);
+    }
+    return g;
+}
+
+// Delete a group; its entries stay logged but become ungrouped
+function removeGroup(id) {
+    state.groups = state.groups.filter(g => g.id !== id);
+    state.log.forEach(i => { if (i.groupId === id) delete i.groupId; });
+    saveState();
+    renderLog();
+}
+
+// Fill the group <select> in the quantity sheet.
+// preselect === undefined → default to the group of the most recent entry.
+function fillGroupSelect(preselect) {
+    if (!el.qtyGroup) return;
+    const wanted = preselect !== undefined
+        ? preselect
+        : (state.log.length ? (state.log[state.log.length - 1].groupId || '') : '');
+    el.qtyGroup.innerHTML = '';
+    const none = document.createElement('option');
+    none.value = '';
+    none.textContent = 'No group';
+    el.qtyGroup.appendChild(none);
+    state.groups.forEach(g => {
+        const o = document.createElement('option');
+        o.value = g.id;
+        o.textContent = g.name;
+        el.qtyGroup.appendChild(o);
+    });
+    const newOpt = document.createElement('option');
+    newOpt.value = '__new';
+    newOpt.textContent = '＋ New group…';
+    el.qtyGroup.appendChild(newOpt);
+    el.qtyGroup.value = state.groups.some(g => g.id === wanted) ? wanted : '';
 }
 // ---------- Food database rendering ----------
 function filteredFoods() {
@@ -159,25 +210,17 @@ function renderFoods() {
         `;
         row.querySelector('.fr-name').textContent = food.name;
         row.addEventListener('click', () => openSheet(food));
-        row.querySelector('.fr-del').addEventListener('click', e => {
-            e.stopPropagation(); // don't open the quantity sheet
-            deleteFood(food.id, food.name);
-        });
-        list.appendChild(row);
-    });
-}
-
-// ---------- Log rendering ----------
 function renderLog() {
     const list = el.loggedList;
     const n = state.log.length;
     el.loggedCount.textContent = n === 0 ? 'empty' : `${n} item${n > 1 ? 's' : ''}`;
-    list.querySelectorAll('.log-row').forEach(r => r.remove());
-    el.emptyState.style.display = n === 0 ? '' : 'none';
+    list.querySelectorAll('.log-row, .group-head').forEach(r => r.remove());
+    el.emptyState.style.display = (n === 0 && state.groups.length === 0) ? '' : 'none';
 
-    [...state.log].reverse().forEach(entry => {
+    const makeRow = entry => {
         const row = document.createElement('div');
         row.className = entry.comment ? 'log-row comment' : 'log-row editable';
+        if (entry.groupId) row.classList.add('in-group');
         row.dataset.id = entry.id;
         row.innerHTML = `
             <div class="lr-info">
@@ -210,11 +253,72 @@ function renderLog() {
             });
         }
         row.querySelector('.lr-del').addEventListener('click', () => removeLog(entry.id));
+        return row;
+    };
+
+    // Group sections first (creation order), then ungrouped entries newest-first
+    state.groups.forEach(group => {
+        const entries = state.log.filter(i => i.groupId === group.id);
+        const head = document.createElement('div');
+        head.className = 'group-head' + (group.open ? ' open' : '');
+        head.dataset.id = group.id;
+        const t = entries.reduce((a, i) => ({
+            kcal: a.kcal + i.kcal,
+            protein: a.protein + i.protein,
+            fat: a.fat + i.fat,
+            carbs: a.carbs + i.carbs
+        }), { kcal: 0, protein: 0, fat: 0, carbs: 0 });
+        head.innerHTML = `
+            <button class="gh-toggle" aria-label="Collapse group">
+                <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+            <div class="gh-name"></div>
+            <div class="gh-totals"></div>
+            <button class="gh-del" aria-label="Remove group">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+        `;
+        head.querySelector('.gh-name').textContent = group.name;
+        head.querySelector('.gh-totals').textContent = entries.length
+            ? `${fmt(t.kcal, 0)} kcal · P ${fmt(t.protein)} · F ${fmt(t.fat)} · C ${fmt(t.carbs)}`
+            : 'empty';
+        head.querySelector('.gh-toggle').addEventListener('click', () => {
+            group.open = !group.open;
+            saveState();
+            renderLog();
+        });
+        head.querySelector('.gh-name').addEventListener('click', () => {
+            const name = prompt('Group name', group.name);
+            if (name == null) return;
+            const trimmed = name.trim();
+            if (!trimmed) { toast('Group name cannot be empty'); return; }
+            group.name = trimmed;
+            saveState();
+            renderLog();
+        });
+        head.querySelector('.gh-del').addEventListener('click', () => removeGroup(group.id));
+        list.appendChild(head);
+        if (group.open) [...entries].reverse().forEach(entry => list.appendChild(makeRow(entry)));
+    });
+
+    // Ungrouped entries (also covers entries whose group no longer exists)
+    [...state.log].reverse().forEach(entry => {
+        if (entry.groupId && getGroup(entry.groupId)) return;
+        list.appendChild(makeRow(entry));
+    });
+}
+        row.querySelector('.fr-del').addEventListener('click', e => {
+            e.stopPropagation(); // don't open the quantity sheet
+            deleteFood(food.id, food.name);
+        });
         list.appendChild(row);
     });
 }
 
+// ---------- Log rendering ----------
+
 // ---------- Comment (note with optional kcal / macros) ----------
+
 let commentEditId = null;
 
 function openCommentModal(id) {
@@ -333,6 +437,7 @@ let sheetEditId = null; // when set, the sheet edits an existing log entry
 function openSheet(food) {
     sheetFood = food;
     sheetEditId = null;
+    fillGroupSelect(); // defaults to the group of the most recent entry
     el.modalFoodName.textContent = food.name;
     el.modalFoodMacros.textContent = `Per 100 g — ${food.kcal} kcal · P ${fmt(food.protein)} · F ${fmt(food.fat)} · C ${fmt(food.carbs)}`;
     el.quantityInput.value = 100;
@@ -359,6 +464,8 @@ function openEditSheet(id) {
     if (!entry || entry.comment) return;
     const g = entry.grams || 0;
     if (g <= 0) return;
+    sheetEditId = id;
+    fillGroupSelect(entry.groupId || '');
     const f = 100 / g;
     sheetFood = {
         name: entry.name,
@@ -418,6 +525,7 @@ function confirmSheet() {
             entry.protein = sheetFood.protein * f;
             entry.fat = sheetFood.fat * f;
             entry.carbs = sheetFood.carbs * f;
+            entry.groupId = el.qtyGroup.value || null;
             saveState();
             renderLog();
             updateTotals();
@@ -431,7 +539,8 @@ function confirmSheet() {
             kcal: sheetFood.kcal * f,
             protein: sheetFood.protein * f,
             fat: sheetFood.fat * f,
-            carbs: sheetFood.carbs * f
+            carbs: sheetFood.carbs * f,
+            groupId: el.qtyGroup.value || null
         });
         saveState();
         renderLog();
@@ -442,6 +551,7 @@ function confirmSheet() {
 }
 
 // ---------- Custom food form ----------
+
 function showForm() {
     el.customFoodForm.style.display = '';
     el.addCustomBtn.textContent = '✕ Close';
@@ -621,7 +731,7 @@ function getGoal() {
 }
 
 function daySig() {
-    return JSON.stringify([state.bmr, state.activity, state.deficit, state.log]);
+    return JSON.stringify([state.bmr, state.activity, state.deficit, state.log, state.groups]);
 }
 
 function scheduleDayPush() {
@@ -639,7 +749,7 @@ async function pushDay(sig) {
     try {
         const ts = new Date().toISOString();
         const { error } = await client.from('day').upsert({
-            id: 'day', bmr: state.bmr, activity: state.activity, deficit: state.deficit, log: state.log, updated_at: ts
+            id: 'day', bmr: state.bmr, activity: state.activity, deficit: state.deficit, log: state.log, groups: state.groups, updated_at: ts
         });
         if (error) throw error;
         lastDaySig = sig;
@@ -684,6 +794,7 @@ async function pullDay() {
             state.activity = data.activity == null ? 0 : +data.activity;
             state.deficit = data.deficit == null ? 0 : +data.deficit;
             state.log = Array.isArray(data.log) ? data.log : [];
+            state.groups = Array.isArray(data.groups) ? data.groups : [];
             state.daySavedAt = cloudTs;
             lastDaySig = daySig();
             try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
@@ -761,6 +872,7 @@ function resetDay() {
     if (state.log.length === 0 && !state.activity) { toast('Nothing to reset'); return; }
     if (!confirm('Clear today\'s log and Activity?\nYour food database and BMR are kept.\nThis clears on ALL synced devices.')) return;
     state.log = [];
+    state.groups = [];
     state.activity = 0; // BMR stays untouched
     lastDaySig = null;          // force the empty-day push to the cloud
     state.daySavedAt = Date.now();
@@ -795,6 +907,27 @@ function wireEvents() {
     });
 
     el.addCommentBtn.addEventListener('click', () => openCommentModal());
+    el.addGroupBtn.addEventListener('click', () => {
+        const name = prompt('New group name');
+        if (name == null) return;
+        const trimmed = name.trim();
+        if (!trimmed) { toast('Group name cannot be empty'); return; }
+        ensureGroup(trimmed);
+        saveState();
+        renderLog();
+        toast('Group added');
+    });
+
+    // "＋ New group…" option inside the quantity sheet group select
+    el.qtyGroup.addEventListener('change', () => {
+        if (el.qtyGroup.value !== '__new') return;
+        const name = prompt('New group name');
+        if (name == null || !name.trim()) { fillGroupSelect(); return; }
+        const g = ensureGroup(name);
+        saveState();
+        renderLog();
+        fillGroupSelect(g.id);
+    });
 
     // Comment sheet
     el.commentCancel.addEventListener('click', closeCommentModal);
@@ -1109,9 +1242,10 @@ function stopAiListening() {
 function aiStateSnapshot() {
     return {
         foods: state.foods.map(f => ({ id: f.id, name: f.name, kcal: f.kcal, protein: f.protein, fat: f.fat, carbs: f.carbs })), // per 100 g
-        log: state.log.map(i => ({ id: i.id, name: i.name, grams: i.grams || 0, kcal: +fmt(i.kcal, 0), protein: +fmt(i.protein), fat: +fmt(i.fat), carbs: +fmt(i.carbs) })),
+        log: state.log.map(i => ({ id: i.id, name: i.name, grams: i.grams || 0, kcal: +fmt(i.kcal, 0), protein: +fmt(i.protein), fat: +fmt(i.fat), carbs: +fmt(i.carbs), group: (i.groupId && getGroup(i.groupId)) ? getGroup(i.groupId).name : null })),
         bmr: state.bmr, activity: state.activity, deficit: state.deficit,
-        totals: { kcal: +fmt(computeTotals().kcal, 0) }
+        totals: { kcal: +fmt(computeTotals().kcal, 0) },
+        groups: state.groups.map(g => ({ id: g.id, name: g.name }))
     };
 }
 
@@ -1119,18 +1253,23 @@ function aiSystemPrompt() {
     return `You are the assistant inside a calorie tracker app. The user speaks casually (e.g. "had 150g chicken and some rice", "half the pasta left", "two eggs"). Respond ONLY with a JSON object, no markdown.
 
 Allowed actions (put any number of them in "actions", in order):
-- {"action":"log_food","match":"<name to find in foods list>","grams":<number>} — logs a food from the user's foods list (per-100 g values). Use when the food exists in the list.
-- {"action":"log_estimated","name":"<display name>","grams":<number or omit>,"kcal":<total kcal>,"protein":<g>,"fat":<g>,"carbs":<g>} — log food NOT in the list. Estimate macros from general nutrition knowledge for the WHOLE eaten amount. Always fill kcal; macros if you can.
+- {"action":"create_group","name":"<group name>"} — create (or reuse) a named group / meal section (e.g. "Breakfast"). Groups get their own kcal + macro totals in the UI.
+- {"action":"rename_group","name":"<existing group>","to":"<new name>"} — rename a group.
+- {"action":"move_to_group","match":"<logged entry>","group":"<group name>"} — assign a logged entry to a group; an empty string ungroups it.
+- {"action":"remove_group","name":"<group>"} — delete a group (its entries stay logged, just ungrouped).
+- {"action":"log_food","match":"<name to find in foods list>","grams":<number>} — logs a food from the user's foods list (per-100 g values). Use when the food exists in the list. Optionally add "group":"<group name>" to also put it into a group.
+- {"action":"log_estimated","name":"<display name>","grams":<number or omit>,"kcal":<total kcal>,"protein":<g>,"fat":<g>,"carbs":<g>} — log food NOT in the list. Estimate macros from general nutrition knowledge for the WHOLE eaten amount. Always fill kcal; macros if you can. Optionally add "group":"<group name>" to also put it into a group.
 - {"action":"edit_log","match":"<name of logged entry>","index":<1-based position in log, optional>,"grams":<new grams, optional>,"kcal":<new total kcal, optional>,"protein":<g, optional>,"fat":<g, optional>,"carbs":<g, optional>} — change an existing logged entry. If only grams change, macros scale proportionally on the client; set kcal/macros only when the user says so.
 - {"action":"remove_log","match":"<name of logged entry>","index":<optional>} — remove matching logged entries (first match unless index given).
 - {"action":"add_food","name":"<name>","kcal":<per 100 g>,"protein":<per 100 g>,"fat":<per 100 g>,"carbs":<per 100 g>} — add to the foods database (per 100 g values).
 - {"action":"update_food","match":"<name in foods list>","kcal":<per 100 g>,"protein":<per 100 g>,"fat":<per 100 g>,"carbs":<per 100 g>} — update a database food (omit fields to keep them).
 - {"action":"delete_food","match":"<name in foods list>"} — remove from the foods database.
-- {"action":"add_comment","name":"<comment text>","kcal":<total kcal>,"protein":<g>,"fat":<g>,"carbs":<g>} — add a note-style entry (e.g. "coffee with milk", "cheat meal", "fasting day") with optional kcal/macros for the WHOLE item. Omit or use 0 for unknown macros. Also use this when the user explicitly says "add a comment/note".
+- {"action":"add_comment","name":"<comment text>","kcal":<total kcal>,"protein":<g>,"fat":<g>,"carbs":<g>} — add a note-style entry (e.g. "coffee with milk", "cheat meal", "fasting day") with optional kcal/macros for the WHOLE item. Omit or use 0 for unknown macros. Also use this when the user explicitly says "add a comment/note". Optionally add "group":"<group name>" to also put it into a group.
 - {"action":"set_bmr","value":<number>} / {"action":"set_activity","value":<number>} / {"action":"set_deficit","value":<number>} — set TDEE inputs (kcal). "activity" is exercise kcal above BMR.
 - {"action":"clear_day"} — clear today's log.
 
 Rules:
+- When the user prefixes foods with a meal/group name ("breakfast: 2 eggs, 60 g oatmeal"), FIRST create/reuse that group with create_group, then give EVERY log action of that command the same "group":"<name>". Reuse an existing group when the name matches case-insensitively (use the exact name from the groups list).
 - The user often lists MANY foods in one message ("breakfast: 2 eggs, 60 g oatmeal, 200 ml milk, banana, coffee"). Create ONE action per food item — never merge several foods into one action, never log just the first item. Long lists of 20+ items are normal; output every single action.
 - If the user mentions a food that exists in the foods list, ALWAYS prefer log_food with the exact "name" from the list.
 - Quantities like "half", "a portion", "one serving" -> grams: use typical serving sizes (e.g. half of a typical cooked serving is about 150-200 g) and say so in the reply. "A bowl of X" when X is in the list -> estimate grams.
@@ -1238,11 +1377,14 @@ function applyAiActions(actions) {
                 const g = aiNum(a.grams, 0);
                 if (!food || g <= 0) return;
                 const f = g / 100;
-                state.log.push({
+                const gr = a.group != null && String(a.group).trim() ? ensureGroup(a.group) : null;
+                const entry = {
                     id: uid(), name: food.name, grams: g,
                     kcal: food.kcal * f, protein: food.protein * f,
                     fat: food.fat * f, carbs: food.carbs * f
-                });
+                };
+                if (gr) entry.groupId = gr.id;
+                state.log.push(entry);
                 needRenderLog = true; applied++;
                 break;
             }
@@ -1250,10 +1392,13 @@ function applyAiActions(actions) {
                 const kcal = aiNum(a.kcal, 0);
                 const name = String(a.name || 'Food').trim();
                 if (!name || kcal <= 0) return;
-                state.log.push({
+                const gr = a.group != null && String(a.group).trim() ? ensureGroup(a.group) : null;
+                const entry = {
                     id: uid(), name, grams: aiNum(a.grams, 0),
                     kcal, protein: aiNum(a.protein, 0), fat: aiNum(a.fat, 0), carbs: aiNum(a.carbs, 0)
-                });
+                };
+                if (gr) entry.groupId = gr.id;
+                state.log.push(entry);
                 needRenderLog = true; applied++;
                 break;
             }
@@ -1314,11 +1459,51 @@ function applyAiActions(actions) {
             case 'add_comment': {
                 const name = String(a.name || '').trim();
                 if (!name) return;
-                state.log.push({
+                const gr = a.group != null && String(a.group).trim() ? ensureGroup(a.group) : null;
+                const entry = {
                     id: uid(), comment: true, grams: 0, name,
                     kcal: aiNum(a.kcal, 0), protein: aiNum(a.protein, 0),
                     fat: aiNum(a.fat, 0), carbs: aiNum(a.carbs, 0)
-                });
+                };
+                if (gr) entry.groupId = gr.id;
+                state.log.push(entry);
+                needRenderLog = true; applied++;
+                break;
+            }
+            case 'create_group': {
+                const g = ensureGroup(a.name);
+                if (!g) return;
+                needRenderLog = true; applied++;
+                break;
+            }
+            case 'rename_group': {
+                const q = String(a.name || '').trim().toLowerCase();
+                const g = state.groups.find(x => x.name.toLowerCase() === q);
+                const to = String(a.to || '').trim();
+                if (!g || !to) return;
+                g.name = to;
+                needRenderLog = true; applied++;
+                break;
+            }
+            case 'move_to_group': {
+                const entry = aiFindLogEntry(a.match, a.index);
+                if (!entry) return;
+                if (a.group == null || !String(a.group).trim()) {
+                    delete entry.groupId;
+                } else {
+                    const g = ensureGroup(a.group);
+                    if (!g) return;
+                    entry.groupId = g.id;
+                }
+                needRenderLog = true; applied++;
+                break;
+            }
+            case 'remove_group': {
+                const q = String(a.name || '').trim().toLowerCase();
+                const g = state.groups.find(x => x.name.toLowerCase() === q);
+                if (!g) return;
+                state.groups = state.groups.filter(x => x.id !== g.id);
+                state.log.forEach(i => { if (i.groupId === g.id) delete i.groupId; });
                 needRenderLog = true; applied++;
                 break;
             }
@@ -1343,6 +1528,7 @@ function applyAiActions(actions) {
             case 'clear_day':
                 if (state.log.length) applied++;
                 state.log = [];
+                state.groups = [];
                 needRenderLog = true;
                 break;
         }
