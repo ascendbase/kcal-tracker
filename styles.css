@@ -458,6 +458,14 @@ input[type=number] { -moz-appearance: textfield; appearance: textfield; }
 #aiExamples { margin-bottom: 12px; }
 #aiSettings { border-top: 1px solid var(--line); padding-top: 14px; }
 
+/* Inline AI chat panel (main content, next to Foods) */
+#aiPanel .db-inner { padding-top: 4px; }
+#aiPanel .ai-mic { width: 56px; height: 56px; margin: 0 auto 12px; }
+#aiPanel .ai-mic svg { width: 24px; height: 24px; }
+#aiPanel .ai-status { margin-top: 2px; }
+#aiPanel .sheet-actions { margin-bottom: 12px; }
+#aiPanel .sheet-actions .btn { flex: none; padding: 10px 16px; }
+
 /* ---------- Toasts ---------- */
 .toasts {
     position: fixed; left: 50%; transform: translateX(-50%);

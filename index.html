@@ -111,6 +111,52 @@
                     </div>
                 </div>
             </section>
+<!-- AI chat (inline, collapsible) -->
+            <section class="panel db-panel" id="aiPanel">
+                <button class="db-toggle" id="aiToggle" aria-expanded="true" aria-controls="aiBody">
+                    <span class="panel-title">AI log</span>
+                    <span class="db-toggle-right">
+                        <span class="panel-sub">voice & text</span>
+                        <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                    </span>
+                </button>
+                <div class="db-body open" id="aiBody">
+                    <div class="db-inner">
+                        <div class="ai-status" id="aiStatus">Tap the mic and speak</div>
+                        <div class="ai-transcript" id="aiTranscript"></div>
+                        <button class="ai-mic" id="aiMic" aria-label="Start voice input">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="9" y="2" width="6" height="12" rx="3"/>
+                                <path d="M5 10v1a7 7 0 0 0 14 0v-1"/>
+                                <line x1="12" y1="18" x2="12" y2="22"/>
+                            </svg>
+                        </button>
+                        <div class="ai-row">
+                            <input type="text" id="aiTextInput" placeholder="…or type a command" autocomplete="off">
+                            <button class="btn solid" id="aiSend">Send</button>
+                        </div>
+                        <div class="chips" id="aiExamples"></div>
+                        <div class="sheet-actions">
+                            <button class="btn ghost" id="aiSettingsToggle">Voice language</button>
+                        </div>
+                        <div id="aiSettings" style="display:none">
+                            <div class="set-field">
+                                <label for="aiLang">Voice input language</label>
+                                <select id="aiLang">
+                                    <option value="">Auto (browser language)</option>
+                                    <option value="ru-RU">Русский (ru-RU)</option>
+                                    <option value="en-US">English (en-US)</option>
+                                    <option value="uk-UA">Українська (uk-UA)</option>
+                                </select>
+                            </div>
+                            <div class="set-note">The AI model runs on the server — nothing to configure here.</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+<!-- Foods database (collapsible) -->
 <!-- Foods database (collapsible) -->
             <section class="panel db-panel">
                 <button class="db-toggle" id="dbToggle" aria-expanded="true" aria-controls="dbBody">
@@ -217,47 +263,6 @@
         </div>
         <div class="set-note">Create the <b>foods</b> table first — see supabase.sql in the repo. The anon key is public-safe when RLS allows anon access.</div>
         <button class="btn ghost full" id="settingsCancel">Close</button>
-    </div>
-</div>
-
-<!-- AI voice sheet -->
-<div class="sheet-backdrop" id="aiModal">
-    <div class="sheet">
-        <div class="sheet-grab"></div>
-        <div class="sheet-head">
-            <div class="sheet-name">AI voice log</div>
-            <div class="sheet-per100">Speak or type — AI can edit everything</div>
-        </div>
-        <div class="ai-status" id="aiStatus">Tap the mic and speak</div>
-        <div class="ai-transcript" id="aiTranscript"></div>
-        <button class="ai-mic" id="aiMic" aria-label="Start voice input">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="9" y="2" width="6" height="12" rx="3"/>
-                <path d="M5 10v1a7 7 0 0 0 14 0v-1"/>
-                <line x1="12" y1="18" x2="12" y2="22"/>
-            </svg>
-        </button>
-        <div class="ai-row">
-            <input type="text" id="aiTextInput" placeholder="…or type a command" autocomplete="off">
-            <button class="btn solid" id="aiSend">Send</button>
-        </div>
-        <div class="chips" id="aiExamples"></div>
-        <div class="sheet-actions">
-            <button class="btn ghost" id="aiSettingsToggle">AI settings</button>
-            <button class="btn ghost" id="aiClose">Close</button>
-        </div>
-        <div id="aiSettings" style="display:none">
-            <div class="set-field">
-                <label for="aiLang">Voice input language</label>
-                <select id="aiLang">
-                    <option value="">Auto (browser language)</option>
-                    <option value="ru-RU">Русский (ru-RU)</option>
-                    <option value="en-US">English (en-US)</option>
-                    <option value="uk-UA">Українська (uk-UA)</option>
-                </select>
-            </div>
-            <div class="set-note">The AI model runs on the server — nothing to configure here.</div>
-        </div>
     </div>
 </div>
 

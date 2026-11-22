@@ -10,6 +10,7 @@ let state = {
     deficit: 0,  // Daily deficit goal — permanent, survives the reset button
     dbOpen: true, // collapsible "Foods" panel open by default
     daySavedAt: 0, // last synced day-state timestamp (ms)
+    aiOpen: true, // inline AI chat panel open by default
     foods: [],   // user-created: { id, name, kcal, protein, fat, carbs } per 100g
     log: [],     // { id, name, grams, kcal, protein, fat, carbs, groupId? }
     groups: []   // per-day meal groups: { id, name, open } — log entries reference via groupId
@@ -58,9 +59,9 @@ function cacheElements() {
      'cloudBtn', 'syncDot', 'settingsModal',
      'supaUrl', 'supaKey', 'supaSave', 'supaDisconnect', 'settingsCancel',
      'proteinPct', 'fatPct', 'carbsPct',
-     'aiBtn', 'aiModal', 'aiStatus', 'aiTranscript', 'aiMic',
+     'aiBtn', 'aiPanel', 'aiToggle', 'aiBody', 'aiStatus', 'aiTranscript', 'aiMic',
      'aiTextInput', 'aiSend', 'aiExamples', 'aiSettingsToggle',
-     'aiClose', 'aiSettings', 'aiLang'
+     'aiSettings', 'aiLang'
     ].forEach(id => el[id] = document.getElementById(id));
 }
 
@@ -83,6 +84,7 @@ function loadState() {
             state.groups = Array.isArray(p.groups) ? p.groups : [];
             state.dbOpen = typeof p.dbOpen === 'boolean' ? p.dbOpen : true;
             state.daySavedAt = typeof p.daySavedAt === 'number' ? p.daySavedAt : 0;
+        state.aiOpen = typeof p.aiOpen === 'boolean' ? p.aiOpen : true;
         }
     } catch (e) {}
 }
@@ -1083,9 +1085,9 @@ function wireEvents() {
 
     el.resetBtn.addEventListener('click', resetDay);
 
-    // AI voice module
-    el.aiBtn.addEventListener('click', openAiSheet);
-    el.aiClose.addEventListener('click', closeAiSheet);
+    // AI voice module — inline panel next to the Foods panel
+    el.aiBtn.addEventListener('click', toggleAiPanel);
+    el.aiToggle.addEventListener('click', toggleAiPanel);
     el.aiMic.addEventListener('click', toggleAiListening);
     el.aiSend.addEventListener('click', sendAiText);
     el.aiTextInput.addEventListener('keydown', e => {
@@ -1112,7 +1114,7 @@ function wireEvents() {
         if (e.key === 'Escape') {
             if (el.quantityModal.classList.contains('open')) closeSheet();
             if (el.commentModal.classList.contains('open')) closeCommentModal();
-            if (el.aiModal.classList.contains('open')) closeAiSheet();
+            if (state.aiOpen) toggleAiPanel();
         }
     });
 }
@@ -1127,6 +1129,10 @@ function init() {
     // Apply saved collapsed/expanded state of the Foods panel
     el.dbBody.classList.toggle('open', state.dbOpen !== false);
     el.dbToggle.setAttribute('aria-expanded', String(state.dbOpen !== false));
+    // Apply saved collapsed/expanded state of the AI chat panel
+    state.aiOpen = state.aiOpen !== false;
+    el.aiBody.classList.toggle('open', state.aiOpen);
+    el.aiToggle.setAttribute('aria-expanded', String(state.aiOpen));
     renderFoods();
     renderLog();
     updateTotals();
@@ -1180,7 +1186,9 @@ function saveAiCfgFromInputs() {
     toast('Voice language saved');
 }
 
-function openAiSheet() {
+// Fill the AI panel UI (examples chips, language, reset status).
+// Called when the panel is opened (topbar mic button or after a day reset).
+function openAiPanel() {
     el.aiStatus.textContent = 'Tap the mic and speak';
     el.aiStatus.className = 'ai-status';
     el.aiTranscript.textContent = '';
@@ -1199,12 +1207,19 @@ function openAiSheet() {
             el.aiExamples.appendChild(b);
         });
     }
-    el.aiModal.classList.add('open');
+    state.aiOpen = true;
+    el.aiBody.classList.add('open');
+    el.aiToggle.setAttribute('aria-expanded', 'true');
+    saveState();
+    el.aiPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-function closeAiSheet() {
-    stopAiListening();
-    el.aiModal.classList.remove('open');
+function toggleAiPanel() {
+    state.aiOpen ? (state.aiOpen = false, stopAiListening())
+                 : openAiPanel();
+    el.aiBody.classList.toggle('open', !!state.aiOpen);
+    el.aiToggle.setAttribute('aria-expanded', String(!!state.aiOpen));
+    saveState();
 }
 
 function sendAiText() {
